@@ -1,0 +1,16 @@
+# PlatformIO
+**/.pio/
+**/.vscode/
+**/build/
+
+# Compiled files
+*.o
+*.elf
+*.bin
+
+# Temporary and OS files
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.local
