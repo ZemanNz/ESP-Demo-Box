@@ -14,7 +14,7 @@ Standardní senzor DHT11 má **4 piny**. Při pohledu na mřížku senzoru zepř
 | **4**     | **GND** (Zem)      | **GND**           | Společná zem |
 
 ### DŮLEŽITÉ UPOZORNĚNÍ: Pull-up Rezistor
-* **Samostatné čidlo (4 piny)**: Mezi pin **VCC (1)** a pin **DATA (2)** je nutné připojit **pull-up rezistor o hodnotě 4.7kΩ až 10kΩ** (viz schéma zapojení DHT11). Bez tohoto rezistoru nebude komunikace fungovat a program bude hlásit chybu čtení.
+* **Samostatné čidlo (4 piny)**: Mezi pin **VCC (1)** a pin **DATA (2)** je nutné připojit **pull-up rezistor o hodnotě 4.7kΩ až 10kΩ** (viz schéma zapojení DHT11) – **úspěšně ověřeno a otestováno s rezistorem 10kΩ**. Bez tohoto rezistoru nebude komunikace fungovat a program bude hlásit chybu čtení.
 * **Modul na PCB (3 piny)**: Pokud máte DHT11 zakoupené jako hotový modul na malé destičce (která má typicky jen 3 piny: `+`/`VCC`, `Out`/`Data`, `-`/`GND`), pak je pull-up rezistor již integrován přímo na destičce a dodatečný rezistor není potřeba.
 
 ---
