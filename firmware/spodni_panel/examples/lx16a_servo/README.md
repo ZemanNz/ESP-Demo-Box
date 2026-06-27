@@ -14,6 +14,8 @@ Sériová serva typu LX-16A komunikují po jednovodičové sběrnici (Half-Duple
 
 *Upozornění: Serva LX-16A vyžadují napájecí napětí v rozsahu **6.0V až 7.4V** (ideálně 2S LiPo baterie nebo stabilizovaný síťový zdroj). Napájení přímo z USB přes ESP32 (5V) může fungovat pro čtení registrů/ID a pro pohyb naprázdno, ale při zátěži dojde k resetu ESP32 z důvodu proudového přetížení.*
 
+*Doporučení pro spolehlivý provoz: Přestože zapojení funguje napřímo (díky tomu, že ESP32 podporuje jednovodičový Half-Duplex režim a servo detekuje 3.3V úrovně), pro dlouhodobý a bezpečný provoz se doporučuje mezi ESP32 a servo zapojit **převodník logických úrovní (Logic Level Shifter)** z 3.3V na 5V. Tím se ochrání GPIO pin ESP32 před 5V úrovněmi ze serva a výrazně se zvýší stabilita komunikace při delších vodičích.*
+
 ---
 
 ## Použité knihovny
