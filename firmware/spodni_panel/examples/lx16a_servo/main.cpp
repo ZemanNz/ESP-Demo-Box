@@ -55,13 +55,28 @@ void setup() {
   }
 }
 
-void loop() {
-  // Periodické ověřování přítomnosti serva každých 5 sekund
-  uint8_t currentId = servoBus.getId();
-  if (currentId != 255) {
-    Serial.printf("[Loop] Pripojeno servo s ID: %d\n", currentId);
-  } else {
-    Serial.println("[Loop] Servo neodpovida.");
+// Pomocná funkce pro přesun na cílový úhel a sledování pohybu
+void moveToAngle(Angle targetAngle) {
+  Serial.printf("\n>>> Prikaz k presunu na: %.1f stupnu\n", targetAngle.deg());
+  servoBus.set(0, targetAngle);
+
+  // Sledování pohybu po dobu 2 sekund (10 kroků po 200 ms)
+  for (int i = 0; i < 10; i++) {
+    delay(200);
+    // Načtení aktuální polohy z čidla serva
+    Angle currentAngle = servoBus.pos(0);
+    if (!currentAngle.isNaN()) {
+      Serial.printf("    Aktualni pozice: %.1f stupnu\n", currentAngle.deg());
+    } else {
+      Serial.println("    Aktualni pozice: neodpovida (offline)");
+    }
   }
-  delay(5000);
+}
+
+void loop() {
+  // Postupný pohyb: 0 -> 120 -> 240 -> 120 -> opakování
+  moveToAngle(0_deg);
+  moveToAngle(120_deg);
+  moveToAngle(240_deg);
+  moveToAngle(120_deg);
 }
