@@ -28,7 +28,7 @@ void setup() {
   // Inicializace LED pásku
   strip.begin();
   strip.show();            // Zhasnout všechny LED
-  strip.setBrightness(50); // Nastavení jasu (0-255)
+  strip.setBrightness(255); // Nastavení jasu na maximum (0-255)
 
   // Inicializace TCS34725 barevného senzoru
   if (tcs.begin(TCS34725_ADDRESS, &Wire)) {
@@ -57,26 +57,46 @@ void loop() {
   uint8_t blue_out = 0;
 
   if (c > 0) {
-    // Přepočet a normalizace barevných složek (r, g, b) na rozsah 0-255 s ohledem na celkový jas (c)
-    // Bez normalizace by barva silně závisela na intenzitě osvětlení a vzdálenosti objektu
+    // Přepočet a normalizace barevných složek (r, g, b) s ohledem na celkový jas (c)
     uint32_t sum = c;
     
-    // Použijeme float pro přesnější poměry, přičemž zohledníme i určitou kalibraci barev
-    float r_ratio = (float)r / sum;
-    float g_ratio = (float)g / sum;
-    float b_ratio = (float)b / sum;
+    // Pro lepší vyvážení bílé (white balance) upravíme poměry.
+    // TCS34725 je velmi citlivý na červenou/infračervenou složku,
+    // proto mírně posílíme zelenou a modrou.
+    float r_ratio = ((float)r / sum) * 1.0f;
+    float g_ratio = ((float)g / sum) * 1.15f;
+    float b_ratio = ((float)b / sum) * 1.25f;
 
-    // Vynásobením konstantou 255 (a případně drobným boostem pro sytost) získáme 0-255 složky
-    // TCS34725 má vyšší citlivost na červenou a infračervenou složku,
-    // proto poměry trochu upravíme pro věrnější barevné podání (jednoduchý white balance)
-    int r_cal = r_ratio * 256 * 1.0;
-    int g_cal = g_ratio * 256 * 0.9;
-    int b_cal = b_ratio * 256 * 0.9;
+    // Výpočet rozdílů pro zvýraznění barev (zvýšení saturace)
+    float max_ratio = max(r_ratio, max(g_ratio, b_ratio));
+    float min_ratio = min(r_ratio, min(g_ratio, b_ratio));
+    float delta = max_ratio - min_ratio;
 
-    // Omezení hodnot do rozsahu 0-255
-    red_out = (r_cal > 255) ? 255 : r_cal;
-    green_out = (g_cal > 255) ? 255 : g_cal;
-    blue_out = (b_cal > 255) ? 255 : b_cal;
+    float r_boosted = r_ratio;
+    float g_boosted = g_ratio;
+    float b_boosted = b_ratio;
+
+    if (delta > 0.02f) { // pokud se nejedná o čistě šedou/černobílou barvu
+      float avg = (r_ratio + g_ratio + b_ratio) / 3.0f;
+      float saturation_factor = 1.8f; // Zesílení rozdílů od průměru pro živější barvy
+      
+      r_boosted = avg + (r_ratio - avg) * saturation_factor;
+      g_boosted = avg + (g_ratio - avg) * saturation_factor;
+      b_boosted = avg + (b_ratio - avg) * saturation_factor;
+
+      // Omezení záporných hodnot
+      if (r_boosted < 0) r_boosted = 0;
+      if (g_boosted < 0) g_boosted = 0;
+      if (b_boosted < 0) b_boosted = 0;
+    }
+
+    // Normalizace na maximální možný jas (roztáhneme největší složku na 255)
+    float highest = max(r_boosted, max(g_boosted, b_boosted));
+    if (highest > 0) {
+      red_out = (r_boosted / highest) * 255;
+      green_out = (g_boosted / highest) * 255;
+      blue_out = (b_boosted / highest) * 255;
+    }
   }
 
   // Výpis naměřených a přepočtených hodnot do sériové linky
