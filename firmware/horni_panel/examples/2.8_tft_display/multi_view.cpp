@@ -15,7 +15,7 @@
 // Inicializace knihovny Adafruit_ST7789 s hardwarovou SPI
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
-// Společné barvy a nastavení pro obě obrazovky
+// Společné barvy a nastavení pro obrazovky
 #define COLOR_CARD        0x0841 // Velmi tmavá šedá s nádechem modré
 #define COLOR_BORDER      0x2104 // Tmavá šedá pro ohraničení
 #define COLOR_TEXT_MUTED  0x7BEF // Tlumená šedá pro popisky
@@ -27,12 +27,13 @@ Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 // Globální časovače a stavové proměnné
 uint32_t last_screen_switch = 0;
-int active_screen = 0; // 0 = Dashboard, 1 = 3D Engine
+int active_screen = 0; // 0 = Dashboard, 1 = 3D Engine, 2 = Snake Game
 
 uint32_t lastUpdate = 0;
 uint32_t lastFastUpdate = 0;
 uint32_t lastFrame = 0;
 uint32_t fpsTimer = 0;
+uint32_t lastSnakeUpdate = 0;
 int frameCount = 0;
 int fpsValue = 0;
 float angle = 0;
@@ -64,7 +65,6 @@ const float cube_verts[8][3] = {
   {-1.0f,  1.0f,  1.0f}
 };
 
-// Definice 12 hran kostky
 const int cube_edges[12][2] = {
   {0, 1}, {1, 2}, {2, 3}, {3, 0},
   {4, 5}, {5, 6}, {6, 7}, {7, 4},
@@ -79,6 +79,14 @@ int old_px1[8], old_py1[8];
 float ax2 = 0.0f, ay2 = 0.0f, az2 = 0.0f;
 int px2[8], py2[8];
 int old_px2[8], old_py2[8];
+
+// Proměnné pro hru Had (Screen 2)
+int snake_x[100];
+int snake_y[100];
+int snake_len = 3;
+int snake_dir = 0; // 0=Doprava, 1=Dolu, 2=Doleva, 3=Nahoru
+int apple_x = 0;
+int apple_y = 0;
 
 // Funkce pro 3D rotaci a perspektivní projekci bodu na 2D obrazovku
 void rotate_and_project(float x, float y, float z, float ax, float ay, float az, float size, int &sx, int &sy) {
@@ -114,13 +122,152 @@ void rotate_and_project(float x, float y, float z, float ax, float ay, float az,
 // Funkce pro vykreslení laserové přechodové animace
 void play_transition() {
   Serial.println("[WIPE] Spousteni skenovaciho prechodu...");
-  // Světelná linka zamete obrazovku do černa zleva doprava
   for (int x = 0; x < 320; x += 16) {
     tft.fillRect(x, 0, 16, 240, ST77XX_BLACK);
     tft.drawFastVLine(x + 16, 0, 240, ST77XX_CYAN);
     tft.drawFastVLine(x + 17, 0, 240, ST77XX_WHITE);
     delay(12);
   }
+}
+
+// Inicializace retro hry Had
+void init_snake_game() {
+  tft.fillRect(0, 20, 320, 220, ST77XX_BLACK);
+  
+  snake_len = 3;
+  snake_dir = 0;
+  snake_x[0] = 5; snake_y[0] = 10;
+  snake_x[1] = 4; snake_y[1] = 10;
+  snake_x[2] = 3; snake_y[2] = 10;
+  
+  apple_x = rand() % 32;
+  apple_y = rand() % 22;
+  
+  // Vykreslení hada
+  for (int i = 0; i < snake_len; i++) {
+    tft.fillRect(snake_x[i] * 10, 20 + snake_y[i] * 10, 10, 10, ST77XX_GREEN);
+  }
+  // Vykreslení jablka
+  tft.fillCircle(apple_x * 10 + 5, 20 + apple_y * 10 + 5, 4, ST77XX_RED);
+  
+  // Vykreslení horního HUDu
+  tft.fillRect(0, 0, 320, 20, 0x10A2);
+  tft.drawFastHLine(0, 20, 320, 0x3186);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(1);
+  tft.setCursor(10, 6);
+  tft.print("RETRO SNAKE GAME (AUTOPLAY)");
+  tft.setCursor(220, 6);
+  tft.print("SCORE: 0");
+}
+
+// Aktualizace a chování hada
+void update_snake() {
+  int head_x = snake_x[0];
+  int head_y = snake_y[0];
+  
+  int diff_x = apple_x - head_x;
+  int diff_y = apple_y - head_y;
+  
+  int preferred_dir = snake_dir;
+  
+  // Rozhodnutí o nejlepší cestě k jablku
+  if (abs(diff_x) >= abs(diff_y) && diff_x != 0) {
+    preferred_dir = (diff_x > 0) ? 0 : 2; // Vpravo nebo vlevo
+  } else if (diff_y != 0) {
+    preferred_dir = (diff_y > 0) ? 1 : 3; // Dolu nebo nahoru
+  }
+  
+  // Ověření, že preferovaný směr nevede ke kolizi
+  int new_x = head_x;
+  int new_y = head_y;
+  if (preferred_dir == 0) new_x++;
+  else if (preferred_dir == 1) new_y++;
+  else if (preferred_dir == 2) new_x--;
+  else if (preferred_dir == 3) new_y--;
+  
+  bool collides = false;
+  if (new_x < 0 || new_x >= 32 || new_y < 0 || new_y >= 22) collides = true;
+  for (int i = 0; i < snake_len; i++) {
+    if (snake_x[i] == new_x && snake_y[i] == new_y) collides = true;
+  }
+  
+  // Pokud koliduje, zkusíme najít jakýkoliv jiný volný směr
+  if (collides) {
+    for (int d = 0; d < 4; d++) {
+      int check_dir = d;
+      if (abs(check_dir - snake_dir) == 2) continue; // Neotáčet se o 180 stupňů
+      
+      int cx = head_x;
+      int cy = head_y;
+      if (check_dir == 0) cx++;
+      else if (check_dir == 1) cy++;
+      else if (check_dir == 2) cx--;
+      else if (check_dir == 3) cy--;
+      
+      bool c_collides = false;
+      if (cx < 0 || cx >= 32 || cy < 0 || cy >= 22) c_collides = true;
+      for (int i = 0; i < snake_len; i++) {
+        if (snake_x[i] == cx && snake_y[i] == cy) c_collides = true;
+      }
+      
+      if (!c_collides) {
+        preferred_dir = check_dir;
+        new_x = cx;
+        new_y = cy;
+        collides = false;
+        break;
+      }
+    }
+  }
+  
+  snake_dir = preferred_dir;
+  
+  // Uložení starého ocasu pro smazání
+  int tail_x = snake_x[snake_len - 1];
+  int tail_y = snake_y[snake_len - 1];
+  
+  // Posun těla
+  for (int i = snake_len - 1; i > 0; i--) {
+    snake_x[i] = snake_x[i - 1];
+    snake_y[i] = snake_y[i - 1];
+  }
+  
+  snake_x[0] = new_x;
+  snake_y[0] = new_y;
+  
+  // Kontrola snězení jablka
+  if (new_x == apple_x && new_y == apple_y) {
+    if (snake_len < 100) {
+      snake_x[snake_len] = tail_x;
+      snake_y[snake_len] = tail_y;
+      snake_len++;
+    }
+    apple_x = rand() % 32;
+    apple_y = rand() % 22;
+    tft.fillCircle(apple_x * 10 + 5, 20 + apple_y * 10 + 5, 4, ST77XX_RED);
+    
+    // Překreslení skóre
+    tft.fillRect(270, 0, 50, 20, 0x10A2);
+    tft.setTextColor(ST77XX_WHITE);
+    tft.setTextSize(1);
+    tft.setCursor(270, 6);
+    tft.print(snake_len - 3);
+  } else {
+    // Smazání ocasu
+    tft.fillRect(tail_x * 10, 20 + tail_y * 10, 10, 10, ST77XX_BLACK);
+  }
+  
+  // Kontrola smrti
+  if (collides) {
+    init_snake_game();
+    return;
+  }
+  
+  // Vykreslení nové hlavy
+  tft.fillRect(snake_x[0] * 10, 20 + snake_y[0] * 10, 10, 10, ST77XX_GREEN);
+  // Očičko
+  tft.fillRect(snake_x[0] * 10 + 2, 20 + snake_y[0] * 10 + 2, 2, 2, ST77XX_BLACK);
 }
 
 // Inicializace specifických grafických prvků pro vybranou obrazovku
@@ -201,6 +348,9 @@ void init_screen(int screen) {
       rotate_and_project(cube_verts[i][0], cube_verts[i][1], cube_verts[i][2], ax2, ay2, az2, 32.0f, old_px2[i], old_py2[i]);
     }
   }
+  else if (screen == 2) {
+    init_snake_game();
+  }
 }
 
 void setup() {
@@ -229,12 +379,12 @@ void setup() {
 void loop() {
   uint32_t currentMillis = millis();
 
-  // Stavový automat pro přepínání obrazovek každých 5 sekund (5000 ms)
+  // Status automat pro přepínání obrazovek každých 5 sekund (5000 ms)
   if (currentMillis - last_screen_switch >= 5000) {
     play_transition(); // Spuštění animace skeneru
     
-    // Záměna obrazovky (0 -> 1 nebo 1 -> 0)
-    active_screen = (active_screen == 0) ? 1 : 0;
+    // Záměna obrazovky (0 -> 1 -> 2 -> 0)
+    active_screen = (active_screen + 1) % 3;
     
     init_screen(active_screen); // Inicializace nové grafiky
     
@@ -244,6 +394,7 @@ void loop() {
     lastFastUpdate = millis();
     lastFrame = millis();
     fpsTimer = millis();
+    lastSnakeUpdate = millis();
     frameCount = 0;
     
     return; // Přeskočení zbytku smyčky v tomto cyklu
@@ -254,7 +405,6 @@ void loop() {
   if (active_screen == 0) {
     // === OBRAZOVKA 0: SYSTÉMOVÝ DASHBOARD ===
     
-    // Rychlý update (30 ms) pro kreslení živé křivky na osciloskopu
     if (currentMillis - lastFastUpdate >= 30) {
       lastFastUpdate = currentMillis;
 
@@ -295,7 +445,6 @@ void loop() {
       tft.fillRect(20, 208, progress_w, 6, ST77XX_CYAN);
     }
 
-    // Pomalý update (1000 ms) pro textové hodnoty
     if (currentMillis - lastUpdate >= 1000) {
       lastUpdate = currentMillis;
 
@@ -340,7 +489,6 @@ void loop() {
   else if (active_screen == 1) {
     // === OBRAZOVKA 1: 3D PROJEKČNÍ ENGINE ===
     
-    // Rychlý frame update (25 ms = ~40 fps) pro 3D animaci
     if (currentMillis - lastFrame >= 25) {
       lastFrame = currentMillis;
       frameCount++;
@@ -372,7 +520,6 @@ void loop() {
         int sy = 120 + (int)((stars[i].y * scale) / stars[i].z);
 
         if (sx >= 0 && sx < 320 && sy >= 0 && sy < 240) {
-          // Ochrana před blikáním hvězd přes texty na HUDu
           bool in_hud_area = (sy < 20 && sx > 70 && sx < 250) || 
                              (sy > 210 && sx < 85) || 
                              (sy > 210 && sx > 210);
@@ -429,19 +576,24 @@ void loop() {
       tft.print((int)(ay1 * 57.2958f) % 360);
     }
 
-    // Pomalý update (1000 ms) pro diagnostiku a FPS na HUDu
     if (currentMillis - fpsTimer >= 1000) {
       fpsValue = frameCount;
       frameCount = 0;
       fpsTimer = currentMillis;
 
-      // Vykreslení FPS bez blikání zbytku obrazovky
       tft.fillRect(20, 222, 60, 10, ST77XX_BLACK);
       tft.setTextColor(ST77XX_GREEN);
       tft.setTextSize(1);
       tft.setCursor(20, 222);
       tft.print("FPS: ");
       tft.print(fpsValue);
+    }
+  }
+  else if (active_screen == 2) {
+    // === OBRAZOVKA 2: AUTOPLAY HRA HAD ===
+    if (currentMillis - lastSnakeUpdate >= 120) {
+      lastSnakeUpdate = currentMillis;
+      update_snake();
     }
   }
 }
