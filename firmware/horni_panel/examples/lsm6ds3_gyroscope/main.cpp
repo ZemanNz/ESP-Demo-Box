@@ -118,12 +118,12 @@ void setup() {
   // standardní adresa pro Adafruit a mnoho dalších modulů
   if (lsm6ds3.begin_I2C(0x6A)) {
     initialized = true;
-    Serial.println("LSM6DS3 úspěšně nalezen a inicializován na adrese 0x6A!");
+    Serial.println("LSM6DS3 úspěšně nalezen and inicializován na adrese 0x6A!");
   } 
   // záložní adresa (pokud je SD0 pin připojen k VCC)
   else if (lsm6ds3.begin_I2C(0x6B)) {
     initialized = true;
-    Serial.println("LSM6DS3 úspěšně nalezen a inicializován na adrese 0x6B!");
+    Serial.println("LSM6DS3 úspěšně nalezen and inicializován na adrese 0x6B!");
   }
 
   if (!initialized) {
