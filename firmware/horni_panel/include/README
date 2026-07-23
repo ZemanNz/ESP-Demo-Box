@@ -1,37 +1,139 @@
+# Horní senzorový panel – Zapojení hardwaru
+**ESP32-S3 DevKitC (44 pinů) | Maturitní projekt**
 
-This directory is intended for project header files.
+Tento soubor obsahuje **aktuální a přesnou** mapu zapojení všech modulů.
+Všechny definice pinů odpovídají souboru `config.h` a `demo_panel.cpp`.
 
-A header file is a file containing C declarations and macro definitions
-to be shared between several project source files. You request the use of a
-header file in your project source file (C, C++, etc) located in `src` folder
-by including it, with the C preprocessing directive `#include'.
+---
 
-```src/main.c
+## Povolení / zakázání modulů
 
-#include "header.h"
+V souboru `config.h` lze jednotlivé moduly zapínat nebo vypínat odkomentováním/zakomentováním příslušného `#define ENABLE_*`.
 
-int main (void)
-{
- ...
-}
-```
+---
 
-Including a header file produces the same results as copying the header file
-into each source file that needs it. Such copying would be time-consuming
-and error-prone. With a header file, the related declarations appear
-in only one place. If they need to be changed, they can be changed in one
-place, and programs that include the header file will automatically use the
-new version when next recompiled. The header file eliminates the labor of
-finding and changing all the copies as well as the risk that a failure to
-find one copy will result in inconsistencies within a program.
+## 1. Digitální senzory
 
-In C, the convention is to give header files names that end with `.h'.
+| Zařízení         | ESP32 GPIO   | Poznámka / Nastavení                        |
+|------------------|--------------|---------------------------------------------|
+| **DHT11 DATA**   | GPIO **3**   | Teplota & vlhkost (4k7 pull-up na 3.3 V)    |
+| **HC-SR04 TRIG** | GPIO **4**   | Ultrazvuk – Trigger pulz (10 µs HIGH)       |
+| **HC-SR04 ECHO** | GPIO **18**  | Ultrazvuk – Echo vstup (3.3 V logic)        |
+| **IR Senzor 1**  | GPIO **38**  | Digitální detekce překážky (LOW = detekce)  |
+| **Tlačítko 1**   | GPIO **47**  | INPUT_PULLUP (GND při stisku)               |
+| **Tlačítko 2**   | GPIO **48**  | INPUT_PULLUP (Reset desky)                  |
 
-Read more about using header files in official GCC documentation:
+---
 
-* Include Syntax
-* Include Operation
-* Once-Only Headers
-* Computed Includes
+## 2. Analogové vstupy
 
-https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html
+| Zařízení       | ESP32 GPIO | Poznámka              |
+|----------------|------------|-----------------------|
+| Fotorezistor 1 | GPIO **1** | ADC1, napěťový dělič  |
+| Fotorezistor 2 | GPIO **2** | ADC1, napěťový dělič  |
+
+---
+
+## 3. Výstupy & LED
+
+| Zařízení          | ESP32 GPIO | Poznámka                               |
+|-------------------|------------|----------------------------------------|
+| **Pasivní bzučák**| GPIO **7** | tone() – tranzistorový spínač          |
+| **LED 1**         | GPIO **39**| Rezistor 220 Ω                         |
+| **LED 2**         | GPIO **40**| Rezistor 220 Ω                         |
+| **LED 3**         | GPIO **41**| Rezistor 220 Ω                         |
+| **WS2812B DATA**  | GPIO **42**| 8 RGB LED pásek (Adafruit_NeoPixel)    |
+
+---
+
+## 4. 74HC595 – Sedmisegmentový displej (3 číslice, bit-banging)
+
+Displej se Společnou Anodou (`SEG_COMMON_ANODE = true`).
+
+| Signál        | HC595 pin | ESP32 GPIO  |
+|---------------|-----------|-------------|
+| DS (DATA)     | pin 14    | GPIO **15** |
+| SH_CP (CLK)   | pin 11    | GPIO **16** |
+| ST_CP (LATCH) | pin 12    | GPIO **17** |
+| OE (Enable)   | pin 13    | GND         |
+| MR (Reset)    | pin 10    | 3.3 V       |
+
+---
+
+## 5. TFT 2.8" displej (ILI9341 / ST7789, SPI)
+
+Knihovna: `Adafruit_ST7789` | Rozlišení: 240×320 (landscape 320×240)
+
+Presné názvy pinů podle potisku na displeji (shodné s `examples/2.8_tft_display/README.md`):
+
+| Displej Pin (Potisk) | ESP32-S3 GPIO | Popis signálu |
+| -------------------- | ------------- | ------------- |
+| **VCC**              | `5V`          | Napájení displeje |
+| **GND**              | `GND`         | Společná zem |
+| **CS**               | `GPIO 10`     | Chip Select (výběr SPI čipu) |
+| **RESET**            | `GPIO 14`     | Reset displeje |
+| **DC**               | `GPIO 13`     | Data / Command (příkazový signál) |
+| **SDI (MOSI)**       | `GPIO 11`     | Hardware SPI Data (Master Out Slave In) |
+| **SCK**              | `GPIO 12`     | Hardware SPI Clock (hodiny) |
+| **LED**              | `3.3V` / `GPIO 21` | Podsvícení displeje (trvale 3.3 V nebo GPIO 21) |
+| **SDO (MISO)**       | *Nezapojeno*  | MISO / Dotyková vrstva (nevyužito) |
+
+---
+
+## 6. I2C sběrnice (Dvou-sběrnicový systém pro zamezení kolizí)
+
+### I2C_0 – Hlavní sběrnice (Wire)
+| Zařízení          | Adresa | ESP32 GPIO          |
+|-------------------|--------|---------------------|
+| LSM6DS3 (gyro)    | 0x6A   | SDA: **8**, SCL: **9** |
+| LCD 1602 (PCF8574)| 0x27   | SDA: **8**, SCL: **9** |
+| VL53L0X (laser)   | 0x29   | SDA: **8**, SCL: **9** |
+
+### I2C_1 – Sekundární sběrnice (Wire1)
+Důvod: TCS34725 má adresu 0x29, která by kolidovala s VL53L0X.
+| Zařízení          | Adresa | ESP32 GPIO          |
+|-------------------|--------|---------------------|
+| TCS34725 (barva)  | 0x29   | SDA: **5**, SCL: **6** |
+
+---
+
+## 7. UART1 – Komunikace s druhým ESP32
+
+| Signál      | ESP32 GPIO  |
+|-------------|-------------|
+| TX (výstup) | GPIO **17** |
+| RX (vstup)  | GPIO **18** |
+
+*(Baudrate: 115200, 8N1. Pozn: GPIO 17/18 lze sdílet pokud je UART1 vypnutý).*
+
+---
+
+## 8. Kompletní tabulka GPIO pinů (Quick Reference)
+
+| GPIO | Připojené zařízení / Funkce | GPIO | Připojené zařízení / Funkce |
+|------|-----------------------------|------|-----------------------------|
+| **1**| Fotorezistor 1              | **21**| TFT podsvícení (BL)        |
+| **2**| Fotorezistor 2              | **38**| IR Senzor 1                 |
+| **3**| DHT11 DATA                  | **39**| LED 1                       |
+| **4**| HC-SR04 TRIG                | **40**| LED 2                       |
+| **5**| I2C1 SDA (TCS34725)         | **41**| LED 3                       |
+| **6**| I2C1 SCL (TCS34725)         | **42**| WS2812B RGB pásek           |
+| **7**| Bzučák                      | **43**| UART0 TX (Serial Monitor)   |
+| **8**| I2C0 SDA                    | **44**| UART0 RX (Serial Monitor)   |
+| **9**| I2C0 SCL                    | **47**| Tlačítko 1                  |
+| **10**| TFT CS (Chip Select)       | **48**| Tlačítko 2 / Reset          |
+| **11**| TFT SDI / MOSI (Data)      |      |                             |
+| **12**| TFT SCK (Hodiny)           |      |                             |
+| **13**| TFT DC (Data/Command)      |      |                             |
+| **14**| TFT RESET                  |      |                             |
+| **15**| 74HC595 DATA                |      |                             |
+| **16**| 74HC595 CLK                 |      |                             |
+| **17**| 74HC595 LATCH / UART1 TX    |      |                             |
+| **18**| HC-SR04 ECHO / UART1 RX     |      |                             |
+
+---
+
+## ⚠️ Důležitá varování pro ESP32-S3 N16R8:
+
+1. **GPIO 19 a 20 (NEPOUŽÍVAT)**: Vnitřně vyhrazeny pro USB D- a D+. Použití pro běžné I/O způsobí zamrznutí nebo zablokování nahrávání.
+2. **GPIO 33, 34, 35, 36, 37 (NEPOUŽÍVAT)**: Vnitřně vyhrazeny pro Octal Flash/PSRAM paměťovou sběrnici. Příkaz `pinMode()` na těchto pinech způsobí okamžitý pády/reset procesoru (`TG1WDT_SYS_RST`).
