@@ -41,6 +41,12 @@
   static HardwareSerial SerialTop(1);
 #endif
 
+#ifdef ENABLE_OLED_SSD1306
+  #include <Adafruit_GFX.h>
+  #include <Adafruit_SSD1306.h>
+  static Adafruit_SSD1306 display(OLED_SCREEN_WIDTH, OLED_SCREEN_HEIGHT, &Wire, OLED_RESET);
+#endif
+
 // =============================================================================
 //  GLOBÁLNÍ STAV
 // =============================================================================
@@ -118,6 +124,25 @@ void setup() {
   Serial.printf("[I2C] Sběrnice inicializována (SDA=%d, SCL=%d)\n", PIN_I2C_SDA, PIN_I2C_SCL);
   Serial.flush();
   scanI2C();
+#endif
+
+  // ── 0.96" OLED SSD1306 (I2C 0x3C) ─────────────────────────────────────────
+#ifdef ENABLE_OLED_SSD1306
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_SCREEN_ADDRESS)) {
+    Serial.println(F("[OLED SSD1306] CHYBA – Inicializace selhala! Zkontroluj I2C adresi 0x3C a zapojení."));
+  } else {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(10, 10);
+    display.println(F("ESP-Demo-Box"));
+    display.setCursor(10, 30);
+    display.println(F("Spodni Panel OK"));
+    display.display();
+    Serial.printf("[OLED SSD1306] OK – Inicializovan na I2C (SDA=%d, SCL=%d, 0x3C)\n", PIN_I2C_SDA, PIN_I2C_SCL);
+  }
+  Serial.flush();
 #endif
 
   // ── UART Komunikace s Horním Panelem ─────────────────────────────────────
@@ -395,6 +420,39 @@ void loop() {
     static uint32_t counter = 0;
     SerialTop.printf("SPODNI:%lu\n", counter);
     Serial.printf("[UART_TOP] > Odesláno: SPODNI:%lu\n", counter++);
+  }
+#endif
+
+  // ── 0.96" OLED SSD1306 ────────────────────────────────────────────────────
+#ifdef ENABLE_OLED_SSD1306
+  {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println(F("=== SPODNI PANEL ==="));
+    display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
+
+    display.setCursor(0, 16);
+    display.printf("Uptime: %lu s", now / 1000UL);
+
+#ifdef ENABLE_JOYSTICK
+    display.setCursor(0, 28);
+    display.printf("JOY X:%4d Y:%4d", analogRead(PIN_JOY_X), analogRead(PIN_JOY_Y));
+#endif
+
+#ifdef ENABLE_POTENTIOMETER
+    display.setCursor(0, 40);
+    display.printf("POT: %4d", analogRead(PIN_POTENTIOMETER));
+#endif
+
+#ifdef ENABLE_ENCODER
+    display.setCursor(0, 52);
+    display.printf("ENC Pos: %d", g_encoderPos);
+#endif
+
+    display.display();
+    Serial.println(F("[OLED SSD1306] Obrazovka obnovena."));
   }
 #endif
 

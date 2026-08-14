@@ -14,16 +14,17 @@
 //  SEZNAM MODULŮ – ODKOMENTUJ CO CHCEŠ POUŽÍVAT
 // =============================================================================
 
-//#define ENABLE_SMART_SERVO    // Jednodrátové Smart Servo LX-16A (UART)
-//#define ENABLE_SERVO_CLASSIC  // Klasické PWM servo (0-180°)
-//#define ENABLE_SERVO_CONT     // Kontinuální PWM servo
-//#define ENABLE_MOTOR_CTRL     // Řízení motoru (PWM výstup)
+#define ENABLE_SMART_SERVO    // Jednodrátové Smart Servo LX-16A (UART)
+#define ENABLE_SERVO_CLASSIC  // Klasické PWM servo (0-180°)
+#define ENABLE_SERVO_CONT     // Kontinuální PWM servo
+#define ENABLE_MOTOR_CTRL     // Řízení motoru (PWM výstup)
 //#define ENABLE_LED_STRIP      // Adresovatelný LED pásek WS2812B
-//#define ENABLE_JOYSTICK       // Analogový joystick (X, Y) a tlačítko (SW)
-//#define ENABLE_POTENTIOMETER  // Analogový potenciometr
-//#define ENABLE_ENCODER        // Rotační enkodér (CLK, DT)
+#define ENABLE_JOYSTICK       // Analogový joystick (X, Y) a tlačítko (SW)
+#define ENABLE_POTENTIOMETER  // Analogový potenciometr
+#define ENABLE_ENCODER        // Rotační enkodér (CLK, DT)
 //#define ENABLE_BUTTONS        // Digitální tlačítka (1 až 5)
 //#define ENABLE_SWITCHES       // Páčkové přepínače (1 a 2)
+#define ENABLE_OLED_SSD1306   // 0.96" OLED displej (I2C 0x3C, Adafruit_SSD1306)
 //#define ENABLE_I2C            // I2C sběrnice a skenování zařízení
 //#define ENABLE_UART_TOP       // UART komunikace s Horním panelem
 
@@ -37,6 +38,12 @@
 #define PIN_UART_TOP_TX     17
 #define PIN_UART_TOP_RX     16
 #define PIN_SMART_SERVO     14   // Jednodrátový UART (LX-16A)
+
+// --- OLED Displej 0.96" (I2C SSD1306) ---
+#define OLED_SCREEN_WIDTH  128
+#define OLED_SCREEN_HEIGHT  64
+#define OLED_RESET          -1
+#define OLED_SCREEN_ADDRESS 0x3C
 
 // --- Analogové vstupy ---
 #define PIN_JOY_X           36   // VP / Sensor_VP
