@@ -1,125 +1,134 @@
-// Testovací kód pro sedmisegmentový displej s posuvnými registry 74HC595
-// Využívá softwarové SPI (bit-banging) na pinech:
-// - DIO (Data Input / DS): GPIO 7
-// - SCLK (Shift Clock / SH_CP): GPIO 3
-// - RCLK (Latch Clock / ST_CP / CS): GPIO 4
-//
-// Tento příklad je navržen pro výukové účely (maturitní projekt).
-
 #include <Arduino.h>
+#include "SystemState.h"
+#include "HardwareSetup.h"
 
-// Definice pinů pro připojení displeje k ESP32-S3
-#define PIN_DATA  7  // DIO / DS (Sériová data)
-#define PIN_CLK   3  // SCLK / SH_CP (Hodinový signál)
-#define PIN_CS    4  // RCLK / ST_CP (Latch / Chip Select)
+// ---------------------------------------------------------
+// Fyzická instance Globálního Stavu (paměť)
+// ---------------------------------------------------------
+SystemState globalState;
 
-// POČET ČÍSLIC NA TVÉM MODULU
-// Nastav podle svého modulu (např. 2, 3 nebo 4 číslice)
-const int NUM_DIGITS = 3;
+// ---------------------------------------------------------
+// 1. Task: Wi-Fi a WebServer (Poběží na Core 0)
+// ---------------------------------------------------------
+void Task_WiFi_Web(void *pvParameters) {
+    Serial.print("Task_WiFi_Web bezi na uvazku (Core): ");
+    Serial.println(xPortGetCoreID());
 
-// TYP DISPLEJE: SPOLEČNÁ ANODA (Common Anode) nebo SPOLEČNÁ KATODA (Common Cathode)
-// Většina čínských modulů s 74HC595 používá Společnou Anodu (aktivní v nule).
-// Pokud ti segmenty svítí obráceně (nesvítí to, co má, a svítí zbytek), změň na false.
-const bool COMMON_ANODE = true; 
+    // Zde bys dal WiFi.begin(), AsyncWebServer.begin() atd.
 
-// Globální proměnná pro počítadlo (každých 500 ms se zvýší o 1)
-unsigned long counter = 0;
-
-// Funkce vracející segmentový vzor pro dané číslo (0-9)
-// Mapování bitů: Bit 0 = segment A, Bit 1 = B, Bit 2 = C, ..., Bit 6 = G, Bit 7 = DP (tečka)
-byte getSegmentPattern(int digit) {
-  // Definice aktivních segmentů pro číslice 0 až 9 (pro Společnou Katodu - aktivní v 1)
-  static const byte segmentMap[] = {
-    0x3F, // 0 (A, B, C, D, E, F)
-    0x06, // 1 (B, C)
-    0x5B, // 2 (A, B, D, E, G)
-    0x4F, // 3 (A, B, C, D, G)
-    0x66, // 4 (B, C, F, G)
-    0x6D, // 5 (A, C, D, F, G)
-    0x7D, // 6 (A, C, D, E, F, G)
-    0x07, // 7 (A, B, C)
-    0x7F, // 8 (A, B, C, D, E, F, G)
-    0x6F  // 9 (A, B, C, D, F, G)
-  };
-
-  // Pokud je požadováno prázdné místo (např. zhasnutí předních nul)
-  if (digit < 0 || digit > 9) {
-    return COMMON_ANODE ? 0xFF : 0x00; // Všechny segmenty vypnuté
-  }
-
-  byte pattern = segmentMap[digit];
-
-  // Pokud je to Společná Anoda, invertujeme bity (0 = svítí, 1 = nesvítí)
-  if (COMMON_ANODE) {
-    pattern = ~pattern;
-  }
-  return pattern;
+    for (;;) {
+        // Smyčka vlákna. Jelikož AsyncWebServer jede na pozadí, 
+        // tady můžeme řešit např. Websockety nebo udržování spojení
+        vTaskDelay(pdMS_TO_TICKS(1000)); // Čekej 1 vteřinu bez blokování CPU
+    }
 }
 
-// Funkce pro odeslání hodnoty na displej
-void displayValue(long value) {
-  // Zahájení přenosu - Latch LOW
-  digitalWrite(PIN_CS, LOW);
+// ---------------------------------------------------------
+// 2. Task: Falešný UART Simulátor (Poběží na Core 0)
+// ---------------------------------------------------------
+void Task_UART_Simulator(void *pvParameters) {
+    Serial.print("Task_UART_Simulator bezi na uvazku (Core): ");
+    Serial.println(xPortGetCoreID());
 
-  long temp = value;
+    for (;;) {
+        // Simulujeme, že každých 5 sekund přijde ze spodního panelu povel
+        // k otočení enkodéru.
+        vTaskDelay(pdMS_TO_TICKS(5000)); 
 
-  // Postupně posíláme data pro jednotlivé číslice od poslední (pravé) k první (levé).
-  // První odeslaná data doputují skrze kaskádu až do posledního posuvného registru.
-  for (int i = 0; i < NUM_DIGITS; i++) {
-    int digit = temp % 10;
-    
-    // Získání segmentového kódu pro danou cifru
-    byte pattern = getSegmentPattern(digit);
-
-    // Zhasínání úvodních nul (např. místo "0015" zobrazíme "  15")
-    if (temp == 0 && i > 0 && value != 0) {
-      pattern = getSegmentPattern(-1); // Zhasne celou pozici
+        Serial.println("[UART MOCK] Prisel povel: ENCODER_RIGHT");
+        
+        // Zápis do sdíleného stavu (Mutex nás ochrání)
+        globalState.moveMenuCursor(1);
     }
-    // Výjimka pro nulu samotnou - tu chceme zobrazit na poslední pozici
-    if (value == 0 && i == 0) {
-      pattern = getSegmentPattern(0);
-    }
-
-    // Odeslání 8 bitů do posuvného registru (MSBFIRST)
-    shiftOut(PIN_DATA, PIN_CLK, MSBFIRST, pattern);
-
-    temp = temp / 10;
-  }
-
-  // Dokončení přenosu - Latch HIGH (data se zkopírují na výstupy registru a displej se rozsvítí)
-  digitalWrite(PIN_CS, HIGH);
 }
 
+// ---------------------------------------------------------
+// 3. Task: Senzory (Poběží na Core 1)
+// ---------------------------------------------------------
+void Task_Sensors(void *pvParameters) {
+    Serial.print("Task_Sensors bezi na uvazku (Core): ");
+    Serial.println(xPortGetCoreID());
+
+    // Zde bys udělal dht.begin(), Wire.begin() atd.
+
+    for (;;) {
+        // Fiktivní čtení teploměru
+        float simulatedTemp = 24.5f + (random(-10, 10) / 10.0f);
+        globalState.updateTemperature(simulatedTemp, 45.0f);
+
+        vTaskDelay(pdMS_TO_TICKS(2000)); // Pomalé senzory čteme např. co 2 vteřiny
+    }
+}
+
+// ---------------------------------------------------------
+// 4. Task: Displej a State Machine (Poběží na Core 1)
+// ---------------------------------------------------------
+void Task_Display_UI(void *pvParameters) {
+    Serial.print("Task_Display_UI bezi na uvazku (Core): ");
+    Serial.println(xPortGetCoreID());
+
+    // Zde bys udělal tft.init(), tft.fillScreen() atd.
+
+    for (;;) {
+        // Zkontrolujeme, jestli si někdo nevyžádal překreslení UI
+        if (globalState.popUiNeedsUpdate()) {
+            
+            AppMode currentMode = globalState.getMode();
+            
+            Serial.println("================================");
+            Serial.println("PREKRESLUJI DISPLEJ!");
+            
+            switch (currentMode) {
+                case MODE_MAIN_MENU:
+                    Serial.println("Kreslim grafiku: HLAVNI MENU");
+                    // Zde zavoláš funkci drawMainMenu()
+                    break;
+                case MODE_SENSORS:
+                    Serial.println("Kreslim grafiku: SENZORY");
+                    // Zde zavoláš funkci drawSensorsDashboard()
+                    break;
+                //... atd
+            }
+            Serial.println("================================");
+        }
+
+        // Tady můžeme dát kratičký delay, např. 50 ms (kreslíme max 20 fps)
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+
+// ---------------------------------------------------------
+// Hlavní SETUP (pouze pro vytvoření vláken)
+// ---------------------------------------------------------
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  Serial.println("\n--- 74HC595 Sedmisegmentový Displej - Start ---");
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println("\n--- ESP-Demo-Box: Boot systemu ---");
 
-  // Nastavení pinů pro komunikaci jako výstupní
-  pinMode(PIN_DATA, OUTPUT);
-  pinMode(PIN_CLK, OUTPUT);
-  pinMode(PIN_CS, OUTPUT);
+    // Zde se zavolá obrovský setup všech modulů
+    if (!initializeAllHardware()) {
+        Serial.println("SYSTEM ZASTAVEN KVULI CHYBE HARDWARU!");
+        while (true) {
+            delay(1000); // Zablokujeme start FreeRTOS, pokud HW selhal
+        }
+    }
 
-  // Uvedení linek do výchozího stavu
-  digitalWrite(PIN_DATA, LOW);
-  digitalWrite(PIN_CLK, LOW);
-  digitalWrite(PIN_CS, HIGH);
+    // Vytváření úloh (Tasks) pro FreeRTOS.
+    // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
-  // Zobrazení počáteční nuly
-  displayValue(0);
-  Serial.println("Inicializace dokončena.");
+    xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 4096, NULL, 1, NULL, 0); // Core 0
+    xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 2048, NULL, 2, NULL, 0); // Core 0 (priorita 2 = vyšší než web)
+    
+    xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 4096, NULL, 1, NULL, 1); // Core 1
+    xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 2048, NULL, 1, NULL, 1); // Core 1
+
+    Serial.println("Vsechna vlakna spustena, mazu hlavni smycku (loop)");
 }
 
+// ---------------------------------------------------------
+// Smyčku loop() už nepotřebujeme, vše řídí FreeRTOS Tasks
+// ---------------------------------------------------------
 void loop() {
-  // Inkrementace počítadla
-  counter++;
-
-  Serial.print("Aktualizace displeje: ");
-  Serial.println(counter);
-
-  // Zápis hodnoty počítadla na displej
-  displayValue(counter);
-
-  // Prodleva 500 ms (půl sekundy) podle zadání
-  delay(500);
+    vTaskDelete(NULL); // Smaže tento původní Arduino loop task a uvolní paměť
 }
