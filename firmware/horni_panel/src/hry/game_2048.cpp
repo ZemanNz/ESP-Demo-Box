@@ -28,21 +28,218 @@ void Game2048::reset() {
 void Game2048::spawnRandomTile() {
     // TIP: Najdi všechny prázdné buňky, vyber jednu náhodnou 
     // a vlož do ní 2 nebo 4.
+    pocetPrazdnych = 0;
+    for (byte y = 0; y < 4; y++) {
+        for (byte x = 0; x < 4; x++) {
+            if(board[x][y] == 0) {
+                prazdne[x][y] = 1;
+                pocetPrazdnych++;
+            } else {
+                prazdne[x][y] = 0;
+            }
+        }
+    }
+    if(pocetPrazdnych > 0) {
+        byte randomIndex = random(0, pocetPrazdnych);
+        byte hodnota = random(0, 10) < 8 ? 2 : 4; // 80% šance na 2, 10% na 4  
+
+        for(byte y = 0; y < 4; y++) {
+            for(byte x = 0; x < 4; x++) {
+                if(prazdne[x][y]){
+                    if(randomIndex == 0) {
+                        board[x][y] = hodnota;
+                        return;
+                    }
+                    randomIndex--;
+                }
+            }
+        }
+    }
+    else{
+        currentState = G2048_GAME_OVER;
+    }
+
 }
 
 // Tahové funkce (Tvoje hlavní výzva!)
 // Zkus implementovat posun všech čísel doleva a sečtení těch stejných.
 void Game2048::moveLeft() {
+    pohyb = false;
+    for (int y = 0; y < 4; y++) {
+        // Fáze 1: Gravitace doleva
+        int volno_x = 0;
+        for (int x = 0; x <= 3; x++) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (x != volno_x) {
+                    board[volno_x][y] = ulozeneCislo;
+                    board[x][y] = 0;
+                    pohyb = true;
+                }
+                volno_x++;
+            }
+        }   
+        
+        // Fáze 2: Sčítání
+        for (int x = 0; x < 3; x++) {
+            if (board[x][y] != 0 && board[x][y] == board[x+1][y]) {
+                board[x][y] = board[x][y] * 2;
+                board[x+1][y] = 0;
+                pohyb = true;
+            }
+        }
+        
+        // Fáze 3: Gravitace doleva po sčítání
+        volno_x = 0;
+        for (int x = 0; x <= 3; x++) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (x != volno_x) {
+                    board[volno_x][y] = ulozeneCislo;
+                    board[x][y] = 0;
+                }
+                volno_x++;
+            }
+        }
+    }
     
+    if (pohyb) {
+        spawnRandomTile();
+    }
 }
 void Game2048::moveRight() {
+    pohyb = false;
+    for (int y = 0; y < 4; y++) {
+        // Fáze 1: Gravitace doprava
+        int volno_x = 3;
+        for (int x = 3; x >= 0; x--) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (x != volno_x) {
+                    board[volno_x][y] = ulozeneCislo;
+                    board[x][y] = 0;
+                    pohyb = true;
+                }
+                volno_x--;
+            }
+        }   
+        
+        // Fáze 2: Sčítání
+        for (int x = 3; x > 0; x--) {
+            if (board[x][y] != 0 && board[x][y] == board[x-1][y]) {
+                board[x][y] = board[x][y] * 2;
+                board[x-1][y] = 0;
+                pohyb = true;
+            }
+        }
+        
+        // Fáze 3: Gravitace doprava po sčítání
+        volno_x = 3;
+        for (int x = 3; x >= 0; x--) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (x != volno_x) {
+                    board[volno_x][y] = ulozeneCislo;
+                    board[x][y] = 0;
+                }
+                volno_x--;
+            }
+        }
+    }
     
+    if (pohyb) {
+        spawnRandomTile();
+    }
 }
 void Game2048::moveUp() {
+    pohyb = false;
+    for (int x = 0; x < 4; x++) {
+        
+        // Fáze 1: Gravitace
+        int volno_y = 0;
+        for (int y = 0; y <= 3; y++) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (y != volno_y) { // Pokud už není úplně dole
+                    board[x][volno_y] = ulozeneCislo;
+                    board[x][y] = 0;
+                    pohyb = true;
+                }
+                volno_y++;
+            }
+        }   
+        
+        // Fáze 2: Sčítání
+        for (int y = 0; y < 3; y++) { // Zde je y > 0 správně, abychom nekontrolovali board[x][-1]
+            if (board[x][y] != 0 && board[x][y] == board[x][y+1]) {
+                board[x][y] = board[x][y] * 2;
+                board[x][y+1] = 0;
+                pohyb = true;
+            }
+        }
+        
+        // Fáze 3: Gravitace po sčítání
+        volno_y = 0;
+        for (int y = 0; y <= 3; y++) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (y != volno_y) { // Pokud už není úplně dole
+                    board[x][volno_y] = ulozeneCislo;
+                    board[x][y] = 0;
+                }
+                volno_y++;
+            }
+        }
+    }
     
+    if (pohyb) {
+        spawnRandomTile();
+    }
 }
 void Game2048::moveDown() {
-    
+    pohyb = false;
+    for (int x = 0; x < 4; x++) {
+        
+        // Fáze 1: Gravitace
+        int volno_y = 3;
+        for (int y = 3; y >= 0; y--) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (y != volno_y) { // Pokud už není úplně dole
+                    board[x][volno_y] = ulozeneCislo;
+                    board[x][y] = 0;
+                    pohyb = true;
+                }
+                volno_y--;
+            }
+        }   
+        
+        // Fáze 2: Sčítání
+        for (int y = 3; y > 0; y--) { // Zde je y > 0 správně, abychom nekontrolovali board[x][-1]
+            if (board[x][y] != 0 && board[x][y] == board[x][y-1]) {
+                board[x][y] = board[x][y] * 2;
+                board[x][y-1] = 0;
+                pohyb = true;
+            }
+        }
+        
+        // Fáze 3: Gravitace po sčítání
+        volno_y = 3;
+        for (int y = 3; y >= 0; y--) {
+            if (board[x][y] != 0) {
+                int ulozeneCislo = board[x][y];
+                if (y != volno_y) {
+                    board[x][volno_y] = ulozeneCislo;
+                    board[x][y] = 0;
+                }
+                volno_y--;
+            }
+        } 
+    }
+
+    if (pohyb) {
+        spawnRandomTile();
+    }
 }
 
 // ------------------------------------------------------------------

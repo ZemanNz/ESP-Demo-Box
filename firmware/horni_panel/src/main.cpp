@@ -4,6 +4,7 @@
 #include "GraphicsManager.h"
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
+#include "hry/game_2048.h"
 
 // ---------------------------------------------------------
 // Fyzická instance Globálního Stavu (paměť)
@@ -11,6 +12,7 @@
 SystemState globalState;
 SnakeGame snake;
 FlappyGame flappy;
+Game2048 g2048;
 
 // ---------------------------------------------------------
 // 1. Task: Wi-Fi a WebServer (Poběží na Core 0)
@@ -29,21 +31,62 @@ void Task_WiFi_Web(void *pvParameters) {
 }
 
 // ---------------------------------------------------------
-// 2. Task: Falešný UART Simulátor (Poběží na Core 0)
+// 2. Task: Demo Autopilot (Simuluje mačkání tlačítek)
 // ---------------------------------------------------------
 void Task_UART_Simulator(void *pvParameters) {
-    Serial.print("Task_UART_Simulator bezi na uvazku (Core): ");
+    Serial.print("Demo Autopilot bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
-    for (;;) {
-        // Simulujeme, že každých 5 sekund přijde ze spodního panelu povel
-        // k otočení enkodéru.
-        vTaskDelay(pdMS_TO_TICKS(5000)); 
+    int timeInMode = 0;
 
-        Serial.println("[UART MOCK] Prisel povel: ENCODER_RIGHT");
+    for (;;) {
+        // Zkontrolujeme situaci každých 100 ms
+        vTaskDelay(pdMS_TO_TICKS(100)); 
+        timeInMode += 100;
         
-        // Zápis do sdíleného stavu (Mutex nás ochrání)
-        globalState.moveMenuCursor(1);
+        AppMode current = globalState.getMode();
+        
+        // --- AUTOPILOT PRO HRY ---
+        if (current == MODE_GAME_FLAPPY) {
+            // Každých 500 ms ptáček poskočí, aby nespadl
+            if (timeInMode % 500 == 0) flappy.jump();
+        } 
+        else if (current == MODE_GAME_SNAKE) {
+            // Každých 800 ms zkusí had náhodně zatočit
+            if (timeInMode % 800 == 0) {
+                int r = random(0, 4);
+                if (r == 0) snake.goUp();
+                else if (r == 1) snake.goDown();
+                else if (r == 2) snake.goLeft();
+                else snake.goRight();
+            }
+        }
+        else if (current == MODE_2048) {
+            // Každých 1000 ms zkusí 2048 udělat tah, pokud není konec hry
+            if (timeInMode % 1000 == 0) {
+                int r = random(0, 4);
+                if (r == 0) g2048.moveUp();
+                else if (r == 1) g2048.moveDown();
+                else if (r == 2) g2048.moveLeft();
+                else g2048.moveRight();
+            }
+        }
+
+        // --- PŘEPÍNÁNÍ MÓDŮ ---
+        // Každých 6 sekund přepneme na další obrazovku
+        if (timeInMode >= 6000) {
+            timeInMode = 0;
+            
+            int nextMode = (int)current + 1;
+            if (nextMode > MODE_BAREVNY) {
+                nextMode = MODE_MAIN_MENU; // Návrat na začátek
+            }
+            
+         ;
+            
+            Serial.printf("[DEMO] Prepinam na mod: %d\n", nextMode);
+            globalState.setMode((AppMode)nextMode);
+        }
     }
 }
 
@@ -112,7 +155,7 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(10, 10, "Teplota:", ST77XX_YELLOW, ST77XX_BLACK, 2);
                     gfx.drawTextPartial(10, 40, "Vlhkost:", ST77XX_YELLOW, ST77XX_BLACK, 2);
-                    gfx.drawLine(0, 70, 240, 70, ST77XX_WHITE);
+                    gfx.drawLine(0, 70, 320, 70, ST77XX_WHITE);
                 }
                 
                 // B) ČÁSTEČNÉ PŘEKRESLENÍ (Mimo podmínku needsFullRedraw = běží pořád!)
@@ -129,8 +172,14 @@ void Task_Display_UI(void *pvParameters) {
             case MODE_2048:
                 delay = 50;
                 if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(50, 100, "2048", ST77XX_WHITE, ST77XX_BLACK, 4);
+                    g2048.reset();
+                    g2048.pohyb = true; // Vynutíme první vykreslení po startu hry
+                }
+                
+                // Překreslí se POUZE když si hra vyžádá překreslení (tzn. změnil se stav)
+                if (g2048.pohyb) {
+                    g2048.draw();
+                    g2048.pohyb = false; // Sníme flag, abychom nekreslili pořád
                 }
                 break;
 
@@ -138,7 +187,7 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(20, 100, "VZDALENOST", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    gfx.drawTextPartial(70, 100, "VZDALENOST", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
 
@@ -146,7 +195,7 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(20, 100, "WIFI SPOJENI", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    gfx.drawTextPartial(52, 100, "WIFI SPOJENI", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
 
@@ -154,7 +203,7 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(50, 100, "SERVA", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    gfx.drawTextPartial(115, 100, "SERVA", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
 
@@ -162,7 +211,7 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(50, 100, "MOTOR", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    gfx.drawTextPartial(115, 100, "MOTOR", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
 
@@ -170,12 +219,15 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(10, 100, "BAREVNY SENZOR", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    gfx.drawTextPartial(34, 100, "BAREVNY SENZOR", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
             
             // =======================================================
             case MODE_GAME_SNAKE: {
+                if (needsFullRedraw) {
+                    snake.reset();
+                }
                 unsigned long aktualniCas = millis();
                 delay = 10;
 
@@ -194,6 +246,9 @@ void Task_Display_UI(void *pvParameters) {
             
             // =======================================================
             case MODE_GAME_FLAPPY: {
+                if (needsFullRedraw) {
+                    flappy.reset();
+                }
                 unsigned long aktualniCasFlappy = millis();
                 delay = 10;
                 if(flappy.getGameOver()){

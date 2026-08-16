@@ -79,7 +79,9 @@ GFXcanvas16* GraphicsManager::getCanvas() {
         Serial.println("[GFX] Alokuji 150KB Canvas do PSRAM pro Double Buffering...");
         // Na ESP32-S3 s povolenou PSRAM (v platformio.ini) se toto
         // automaticky nalokuje do obrovské externí PSRAM paměti.
-        canvas = new GFXcanvas16(TFT_W, TFT_H); 
+        // POZOR: Displej je rotovaný na šířku, takže plátno musí mít 
+        // šířku TFT_H (320) a výšku TFT_W (240)!
+        canvas = new GFXcanvas16(TFT_H, TFT_W); 
     }
     return canvas;
 }

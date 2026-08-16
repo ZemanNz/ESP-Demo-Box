@@ -23,12 +23,17 @@ public:
     void moveDown();
 
     Game2048State getState() const { return currentState; }
+    
+    // Uživatelova proměnná pro detekci pohybu
+    bool pohyb;
 
 private:
     void spawnRandomTile(); // Přidá 2 nebo 4 na náhodné prázdné políčko
     uint16_t getColorForNumber(int num); // Vrací barvu podle čísla
 
     int board[4][4];
+    bool prazdne[4][4];
+    byte pocetPrazdnych;
     Game2048State currentState;
     int score;
 };

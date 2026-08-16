@@ -14,20 +14,20 @@
 //  SEZNAM MODULŮ – ODKOMENTUJ CO CHCEŠ POUŽÍVAT
 // =============================================================================
 
-#define ENABLE_DHT            // Teplotní a vlhkostní senzor (DHT11)
-#define ENABLE_ULTRASONIC     // Ultrazvukový senzor HC-SR04
-#define ENABLE_IR_SENSORS     // IR digitální senzory (2x)
+//#define ENABLE_DHT            // Teplotní a vlhkostní senzor (DHT11)
+//#define ENABLE_ULTRASONIC     // Ultrazvukový senzor HC-SR04
+//#define ENABLE_IR_SENSORS     // IR digitální senzory (2x)
 //#define ENABLE_PHOTORESISTORS // Analogové fotorezistory (2x)
 //#define ENABLE_BUTTONS        // Tlačítka (2x)
-#define ENABLE_BUZZER         // Pasivní bzučák
+//#define ENABLE_BUZZER         // Pasivní bzučák
 //#define ENABLE_LEDS           // Jednoduché LED diody (3x)
-#define ENABLE_WS2812B        // Adresovatelný LED pásek WS2812B (FastLED)
-#define ENABLE_74HC595        // Sedmisegmentový displej přes 74HC595 (bit-banging)
+//#define ENABLE_WS2812B        // Adresovatelný LED pásek WS2812B (FastLED)
+//#define ENABLE_74HC595        // Sedmisegmentový displej přes 74HC595 (bit-banging)
 #define ENABLE_TFT_ST7789     // TFT 2.8" displej ST7789 (SPI, Adafruit_ST7789)
-#define ENABLE_LSM6DS3        // Gyroskop/akcelerometr LSM6DS3 (I2C_0)
-#define ENABLE_LCD1602        // LCD displej 16x2 (I2C_0, adresa 0x27)
-#define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
-#define ENABLE_TCS34725       // Barevný senzor TCS34725 (I2C_1/Wire1, 0x29)
+//#define ENABLE_LSM6DS3        // Gyroskop/akcelerometr LSM6DS3 (I2C_0)
+//#define ENABLE_LCD1602        // LCD displej 16x2 (I2C_0, adresa 0x27)
+//#define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
+//#define ENABLE_TCS34725       // Barevný senzor TCS34725 (I2C_1/Wire1, 0x29)
 //#define ENABLE_UART_ESP       // UART komunikace s druhým ESP32
 
 // =============================================================================
