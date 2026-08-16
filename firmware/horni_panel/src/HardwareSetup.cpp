@@ -4,11 +4,9 @@
 #include <SPI.h>
 
 // --- Displej ---
-#ifdef ENABLE_TFT_ST7789
-  #include <Adafruit_GFX.h>
-  #include <Adafruit_ST7789.h>
-  Adafruit_ST7789 tft(PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
-#endif
+#include "GraphicsManager.h"
+// Objekt gfx je deklarován v GraphicsManager.h a vytvořen v GraphicsManager.cpp, 
+// takže ho tu nemusíme vytvářet znovu.
 
 // --- Senzory a periferie ---
 #if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
@@ -58,14 +56,10 @@
 void drawErrorScreen(String errorMessage) {
     Serial.println("[FAIL LOG] " + errorMessage);
 #ifdef ENABLE_TFT_ST7789
-    tft.fillScreen(ST77XX_RED);
-    tft.setTextColor(ST77XX_WHITE);
-    tft.setTextSize(2);
-    tft.setCursor(10, 40);
-    tft.println("KRITICKA CHYBA:");
-    tft.setTextSize(1);
-    tft.setCursor(10, 100);
-    tft.println(errorMessage);
+    // Nyní používáme bezpečně GraphicsManager pro kreslení chyb!
+    gfx.clearScreen(ST77XX_RED);
+    gfx.drawTextPartial(10, 40, "KRITICKA CHYBA:", ST77XX_WHITE, ST77XX_RED, 2);
+    gfx.drawTextPartial(10, 100, errorMessage, ST77XX_WHITE, ST77XX_RED, 1);
 #endif
 }
 
@@ -74,20 +68,16 @@ void drawErrorScreen(String errorMessage) {
 // ---------------------------------------------------------
 bool setupDisplay() {
 #ifdef ENABLE_TFT_ST7789
-    Serial.println("[SETUP] Inicializace TFT displeje...");
-    pinMode(PIN_TFT_LED, OUTPUT);
-    digitalWrite(PIN_TFT_LED, HIGH);
-    
+    // SPI Sběrnici musí zapnout HardwareSetup jako hlavní dirigent hardware
     SPI.begin(PIN_TFT_SCLK, PIN_TFT_MISO, PIN_TFT_MOSI, PIN_TFT_CS);
-    tft.init(TFT_W, TFT_H);
-    tft.invertDisplay(false);
-    tft.setRotation(1);
     
-    tft.fillScreen(ST77XX_BLACK);
-    tft.setTextColor(ST77XX_GREEN);
-    tft.setTextSize(2);
-    tft.setCursor(20, 15);
-    tft.print("BOOT: OK");
+    // Potom zavoláme Manažera, aby oživil samotný displej
+    if (!gfx.init()) {
+        return false;
+    }
+    
+    // Kreslení testovací zelené obrazovky už dělá Manažer
+    gfx.drawTextPartial(20, 15, "BOOT: OK", ST77XX_GREEN, ST77XX_BLACK, 2);
 #endif
     return true; 
 }

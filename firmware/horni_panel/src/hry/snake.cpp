@@ -59,21 +59,27 @@ void SnakeGame::goLeft()  { if (direction.x == 0) direction = {-1, 0}; }
 void SnakeGame::goRight() { if (direction.x == 0) direction = {1, 0}; }
 
 void SnakeGame::draw() {
-    // Kreslení v RAM bufferu
-    GameEngine::clearScreen(GAME_COLOR_BLACK);
+    GFXcanvas16* canvas = gfx.getCanvas();
+    if (!canvas) return; // Ochrana
+
+    // Vyčistíme paměť na černo
+    canvas->fillScreen(ST77XX_BLACK);
 
     // Kreslení jídla (Červená)
-    GameEngine::fillRect(jidlo.x * BLOCK_SIZE, jidlo.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, GAME_COLOR_RED);
+    canvas->fillRect(jidlo.x * BLOCK_SIZE, jidlo.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, ST77XX_RED);
 
     // Kreslení hada (Zelená)
     for (const auto& p : snake) {
-        GameEngine::fillRect(p.x * BLOCK_SIZE, p.y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1, GAME_COLOR_GREEN);
+        canvas->fillRect(p.x * BLOCK_SIZE, p.y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1, ST77XX_GREEN);
     }
 
     if (game_stopped) {
-        GameEngine::drawText(60, 110, "GAME OVER", GAME_COLOR_RED, 3);
+        canvas->setTextColor(ST77XX_RED);
+        canvas->setTextSize(3);
+        canvas->setCursor(45, 110);
+        canvas->print("GAME OVER");
     }
 
-    // Přenese hotový snímek z RAM na displej bez probliknutí!
-    GameEngine::displayFrame();
+    // Přenese hotový snímek z RAM na displej bez probliknutí
+    gfx.pushCanvasToScreen();
 }

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "game_engine.h"
+#include "../include/GraphicsManager.h"
 #include <vector>
 
 struct Point {

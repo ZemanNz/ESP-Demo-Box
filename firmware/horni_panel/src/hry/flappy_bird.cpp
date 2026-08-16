@@ -77,29 +77,35 @@ void FlappyGame::update() {
 }
 
 void FlappyGame::draw() {
-    // Kreslení v RAM bufferu
-    GameEngine::clearScreen(GAME_COLOR_CYAN);
+    GFXcanvas16* canvas = gfx.getCanvas();
+    if (!canvas) return; // Ochrana
+
+    // Vyčistíme paměť (Cyan = modré nebe)
+    canvas->fillScreen(ST77XX_CYAN);
 
     // Kreslení ptáčka (Žluté tělo, černé oko)
     float birdX = 50.0f;
-    GameEngine::fillRect(birdX, birdY, 20, 16, GAME_COLOR_YELLOW);
-    GameEngine::fillRect(birdX + 14, birdY + 3, 4, 4, GAME_COLOR_BLACK);
+    canvas->fillRect(birdX, birdY, 20, 16, ST77XX_YELLOW);
+    canvas->fillRect(birdX + 14, birdY + 3, 4, 4, ST77XX_BLACK);
 
     // Kreslení překážek (Zelená)
     float pipeW = 30.0f;
     for (const auto& p : prekazky) {
         // Horní trubka
-        GameEngine::fillRect(p.x, 0, pipeW, p.obstacleGapY, GAME_COLOR_GREEN);
+        canvas->fillRect(p.x, 0, pipeW, p.obstacleGapY, ST77XX_GREEN);
 
         // Spodní trubka
         float bottomPipeY = p.obstacleGapY + p.gapY;
-        GameEngine::fillRect(p.x, bottomPipeY, pipeW, 240.0f - bottomPipeY, GAME_COLOR_GREEN);
+        canvas->fillRect(p.x, bottomPipeY, pipeW, 240.0f - bottomPipeY, ST77XX_GREEN);
     }
 
     if (isGameOver) {
-        GameEngine::drawText(50, 100, "GAME OVER", GAME_COLOR_RED, 3);
+        canvas->setTextColor(ST77XX_RED);
+        canvas->setTextSize(3);
+        canvas->setCursor(50, 100);
+        canvas->print("GAME OVER");
     }
 
-    // Přenese hotový snímek z RAM na displej bez probliknutí!
-    GameEngine::displayFrame();
+    // Přenese hotový snímek z RAM na displej bez probliknutí
+    gfx.pushCanvasToScreen();
 }

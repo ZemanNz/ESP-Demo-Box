@@ -10,9 +10,15 @@
 // ---------------------------------------------------------
 enum AppMode {
     MODE_MAIN_MENU,
+    MODE_SENSORS,
     MODE_GAME_SNAKE,
-    MODE_MOTOR_TEST,
-    MODE_SENSORS
+    MODE_GAME_FLAPPY,
+    MODE_2048,
+    MODE_VZDALENOST,
+    MODE_WIFI_SPOJENI,
+    MODE_SERVA,
+    MODE_MOTOR,
+    MODE_BAREVNY
 };
 
 // ---------------------------------------------------------
@@ -123,9 +129,38 @@ public:
             xSemaphoreGive(stateMutex);
         }
     }
+    //sem musime dat dalsi gettery a settery pro dalsi senzory, ktere budeme chtit cist a zapisovat
 };
 
 // Zde deklarujeme, že globalState existuje (fyzicky ho vytvoříme v main.cpp)
 extern SystemState globalState;
+
+/*
+================================================================================
+  PŘÍKLADY POUŽITÍ (CHEATSHEET PRO SYSTEM STATE A MUTEXY)
+================================================================================
+
+1. ČTENÍ AKTUÁLNÍHO MÓDU (Např. v grafickém vlákně)
+   if (globalState.getMode() == MODE_MAIN_MENU) {
+       // Nakresli hlavní menu
+   }
+
+2. ZÁPIS HODNOT ZE SENZORU (Např. ve vlákně pro senzory)
+   // Nemusíš řešit zamykání (Mutex). Objekt "globalState" to uvnitř
+   // funkcí udělá automaticky za tebe!
+   globalState.updateTemperature(25.4, 60.1);
+
+3. ZMĚNA MÓDU (Např. když uživatel klikne v menu na "Spustit Hada")
+   globalState.setMode(MODE_GAME_SNAKE);
+   // setMode automaticky zvedne vlajku "uiNeedsUpdate = true", 
+   // takže displej se hned v dalším cyklu překreslí.
+
+4. JAK PŘEKRESLOVAT DISPLEJ JEN KDYŽ JE TO POTŘEBA (Šetří výkon)
+   if (globalState.popUiNeedsUpdate()) {
+       // Tento blok se spustí JEN TEHDY, když někdo změnil Mód, 
+       // nebo pohnul kurzorem. Zde zavoláš překreslení menu.
+   }
+================================================================================
+*/
 
 #endif // SYSTEM_STATE_H
