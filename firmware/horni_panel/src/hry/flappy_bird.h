@@ -7,6 +7,7 @@ struct Prekazka {
     float x;
     float obstacleGapY;
     float gapY;
+    bool passed;
 };
 
 class FlappyGame {
@@ -28,6 +29,7 @@ private:
     float gravity;
     float lift;
     bool isGameOver;
+    int score;
 
     std::vector<Prekazka> prekazky;
 };

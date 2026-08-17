@@ -84,6 +84,7 @@ void Game2048::moveLeft() {
         for (int x = 0; x < 3; x++) {
             if (board[x][y] != 0 && board[x][y] == board[x+1][y]) {
                 board[x][y] = board[x][y] * 2;
+                score += board[x][y];
                 board[x+1][y] = 0;
                 pohyb = true;
             }
@@ -128,6 +129,7 @@ void Game2048::moveRight() {
         for (int x = 3; x > 0; x--) {
             if (board[x][y] != 0 && board[x][y] == board[x-1][y]) {
                 board[x][y] = board[x][y] * 2;
+                score += board[x][y];
                 board[x-1][y] = 0;
                 pohyb = true;
             }
@@ -173,6 +175,7 @@ void Game2048::moveUp() {
         for (int y = 0; y < 3; y++) { // Zde je y > 0 správně, abychom nekontrolovali board[x][-1]
             if (board[x][y] != 0 && board[x][y] == board[x][y+1]) {
                 board[x][y] = board[x][y] * 2;
+                score += board[x][y];
                 board[x][y+1] = 0;
                 pohyb = true;
             }
@@ -218,6 +221,7 @@ void Game2048::moveDown() {
         for (int y = 3; y > 0; y--) { // Zde je y > 0 správně, abychom nekontrolovali board[x][-1]
             if (board[x][y] != 0 && board[x][y] == board[x][y-1]) {
                 board[x][y] = board[x][y] * 2;
+                score += board[x][y];
                 board[x][y-1] = 0;
                 pohyb = true;
             }
@@ -270,11 +274,18 @@ void Game2048::draw() {
 
     canvas->fillScreen(ST77XX_BLACK);
 
+    // Vykreslení skóre do horního okraje
+    canvas->setTextColor(ST77XX_WHITE);
+    canvas->setTextSize(2);
+    canvas->setCursor(10, 2);
+    canvas->print("Skore: ");
+    canvas->print(score);
+
     // Výpočet pozic pro vykreslení krásně doprostřed displeje
     int tileSize = 50;
     int spacing = 6;
     int startX = (320 - (4 * tileSize + 3 * spacing)) / 2; 
-    int startY = (240 - (4 * tileSize + 3 * spacing)) / 2; 
+    int startY = 20; // Hrací plocha začíná o kousek níž, aby se vešlo skóre
 
     // Projdeme pole 4x4
     for (int y = 0; y < 4; y++) {

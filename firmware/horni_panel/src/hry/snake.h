@@ -29,6 +29,7 @@ private:
     Point direction;
     Point jidlo;
     bool game_stopped;
+    int score;
 
     static const int BLOCK_SIZE = 10; // 10px na políčko (při 320x240 je to 32x24 políček)
     static const int GRID_W = 32;

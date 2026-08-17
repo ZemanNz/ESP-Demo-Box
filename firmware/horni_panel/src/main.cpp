@@ -2,6 +2,8 @@
 #include "SystemState.h"
 #include "HardwareSetup.h"
 #include "GraphicsManager.h"
+#include "SensorManager.h"
+#include "UartProtocol.h"
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
@@ -21,17 +23,13 @@ void Task_WiFi_Web(void *pvParameters) {
     Serial.print("Task_WiFi_Web bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
-    // Zde bys dal WiFi.begin(), AsyncWebServer.begin() atd.
-
     for (;;) {
-        // Smyčka vlákna. Jelikož AsyncWebServer jede na pozadí, 
-        // tady můžeme řešit např. Websockety nebo udržování spojení
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Čekej 1 vteřinu bez blokování CPU
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
 // ---------------------------------------------------------
-// 2. Task: Demo Autopilot (Simuluje mačkání tlačítek)
+// 2A. Task: Demo Autopilot (Simulátor pro testování displeje)
 // ---------------------------------------------------------
 void Task_UART_Simulator(void *pvParameters) {
     Serial.print("Demo Autopilot bezi na uvazku (Core): ");
@@ -40,7 +38,6 @@ void Task_UART_Simulator(void *pvParameters) {
     int timeInMode = 0;
 
     for (;;) {
-        // Zkontrolujeme situaci každých 100 ms
         vTaskDelay(pdMS_TO_TICKS(100)); 
         timeInMode += 100;
         
@@ -48,11 +45,9 @@ void Task_UART_Simulator(void *pvParameters) {
         
         // --- AUTOPILOT PRO HRY ---
         if (current == MODE_GAME_FLAPPY) {
-            // Každých 500 ms ptáček poskočí, aby nespadl
             if (timeInMode % 500 == 0) flappy.jump();
         } 
         else if (current == MODE_GAME_SNAKE) {
-            // Každých 800 ms zkusí had náhodně zatočit
             if (timeInMode % 800 == 0) {
                 int r = random(0, 4);
                 if (r == 0) snake.goUp();
@@ -62,7 +57,6 @@ void Task_UART_Simulator(void *pvParameters) {
             }
         }
         else if (current == MODE_2048) {
-            // Každých 1000 ms zkusí 2048 udělat tah, pokud není konec hry
             if (timeInMode % 1000 == 0) {
                 int r = random(0, 4);
                 if (r == 0) g2048.moveUp();
@@ -73,20 +67,120 @@ void Task_UART_Simulator(void *pvParameters) {
         }
 
         // --- PŘEPÍNÁNÍ MÓDŮ ---
-        // Každých 6 sekund přepneme na další obrazovku
         if (timeInMode >= 6000) {
             timeInMode = 0;
-            
             int nextMode = (int)current + 1;
             if (nextMode > MODE_BAREVNY) {
-                nextMode = MODE_MAIN_MENU; // Návrat na začátek
+                nextMode = MODE_MAIN_MENU;
             }
-            
-         ;
-            
             Serial.printf("[DEMO] Prepinam na mod: %d\n", nextMode);
             globalState.setMode((AppMode)nextMode);
         }
+    }
+}
+void Task_UART(void *pvParameters) {
+    unsigned long lastSendTime = 0;
+    
+    // Vyrovnávací paměti pro pakety
+    TopToBottomPacket outPacket;
+    BottomToTopPacket inPacket;
+
+    for (;;) {
+        unsigned long now = millis();
+
+        // -------------------------------------------------------------
+        // 1. ODESÍLÁNÍ (HORNÍ -> DOLNÍ PANEL)
+        // -------------------------------------------------------------
+        bool hasChanged = globalState.popBottomNeedsTx();
+        bool heartbeatTimeout = (now - lastSendTime >= 200);
+
+        // Pošli pokud: Nastala změna NEBO vypršelo 200 ms od posledního odeslání
+        if (hasChanged || heartbeatTimeout) {
+            lastSendTime = now;
+
+            // A) Zkopírujeme si aktuální stav ze SystemState
+            SensorData data = globalState.getSensorData();
+
+            // B) Naplníme odchozí paket
+            outPacket.startByte = UART_FRAME_START_TOP_TO_BOTTOM; // 0xAA
+            outPacket.currentMode = (uint8_t)globalState.getMode();
+            outPacket.overrideAutonomy = false; // Nebo true podle potřeby
+            
+            outPacket.targetSmartServoAngle = data.smartServoAngle;
+            outPacket.targetServoAngle = data.servoAngle;
+            outPacket.targetContinuousServo = data.continuousServoSpeed;
+            outPacket.targetMotorSpeed = data.motorSpeed;
+
+            for (int i = 0; i < 8; i++) {
+                outPacket.ledStrip[i] = data.ledStripBottom[i];
+            }
+            outPacket.ledBrightness = data.ledStripBottomBrightness;
+
+            strncpy(outPacket.oledLine1, data.bottomOledLine1, 16);
+            outPacket.oledLine1[16] = '\0';
+            strncpy(outPacket.oledLine2, data.bottomOledLine2, 16);
+            outPacket.oledLine2[16] = '\0';
+
+            outPacket.endByte = UART_FRAME_END; // 0xFE
+
+            // C) Spočítáme kontrolní součet ze všech datových bajtů před checksumem
+            outPacket.checksum = calculateChecksum(
+                (const uint8_t*)&outPacket, 
+                sizeof(TopToBottomPacket) - 2 // Odečteme checksum a endByte
+            );
+
+            // D) Odešleme celý binární blok najednou
+            SerialESP.write((const uint8_t*)&outPacket, sizeof(TopToBottomPacket));
+        }
+
+        // -------------------------------------------------------------
+        // 2. PŘÍJEM (DOLNÍ -> HORNÍ PANEL)
+        // -------------------------------------------------------------
+        
+        while (SerialESP.available() >= sizeof(BottomToTopPacket)) {
+            
+            // 2. KONTROLA ZAČÁTKU (Synchronizace):
+            // Funkce peek() se jen "podívá" na první bajt v bufferu, ale nesmaže ho
+            if (SerialESP.peek() != UART_FRAME_START_BOTTOM_TO_TOP) { // Není to 0x55?
+                SerialESP.read(); // Zahodíme 1 vadný bajt a zkusíme to v dalším kole znova
+                continue;
+            }
+            // 3. PŘEČTENÍ CELÉHO PAKETU NARÁZ
+            // readBytes bleskově nasype všechny bajty přímo do naší struktury v paměti!
+            SerialESP.readBytes((uint8_t*)&inPacket, sizeof(BottomToTopPacket));
+            // 4. KONTROLA KONCE A KONTROLNÍHO SOUČTU
+            uint8_t calculatedCRC = calculateChecksum(
+                (const uint8_t*)&inPacket, 
+                sizeof(BottomToTopPacket) - 2
+            );
+            // Ověříme, že sedí koncový bajt (0xFE) i náš XOR checksum
+            if (inPacket.endByte == UART_FRAME_END && inPacket.checksum == calculatedCRC) {
+                
+                // 5. DATA JSOU 100% V POŘÁDKU -> ZAPÍŠEME JE DO SYSTEMSTATE
+                globalState.updateJoystick(inPacket.joyX, inPacket.joyY, inPacket.joyBtn);
+                globalState.updateDownButtons(
+                    inPacket.btnDown[0], inPacket.btnDown[1], 
+                    inPacket.btnDown[2], inPacket.btnDown[3], inPacket.btnDown[4]
+                );
+                globalState.updateEncoder(inPacket.encoderPos, inPacket.encoderDelta, inPacket.encoderBtn);
+                globalState.updatePotentiometer(inPacket.potentiometer);
+                globalState.updateSwitches(inPacket.switch1, inPacket.switch2);
+                
+                // Zpětná vazba z akčních členů
+                globalState.updateSmartServo(inPacket.currentSmartServoAngle);
+                globalState.updateServo(inPacket.currentServoAngle);
+                globalState.updateMotor(inPacket.currentMotorSpeed);
+                globalState.updateContinuousServo(inPacket.currentContinuousServo);
+                
+            } else {
+                // Pokud nesedí checksum (rušení na drátě), paket jednoduše ignorujeme
+                Serial.println("[UART] Chyba kontrolniho souctu! Paket zahozen.");
+            }
+        }
+
+        // -------------------------------------------------------------
+        // Krátká neblokující prodleva (smyčka běží každých 10 ms)
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -97,14 +191,11 @@ void Task_Sensors(void *pvParameters) {
     Serial.print("Task_Sensors bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
-    // Zde bys udělal dht.begin(), Wire.begin() atd.
-
     for (;;) {
-        // Fiktivní čtení teploměru
-        float simulatedTemp = 24.5f + (random(-10, 10) / 10.0f);
-        globalState.updateTemperature(simulatedTemp, 45.0f);
+        // Čtení všech aktivních senzorů a zápis do globalState s vlastním časováním
+        sensorManager.updateAll();
 
-        vTaskDelay(pdMS_TO_TICKS(2000)); // Pomalé senzory čteme např. co 2 vteřiny
+        vTaskDelay(pdMS_TO_TICKS(10)); // Perioda 10 ms (rychlé vstupy 50 Hz, pomalé se filtrují)
     }
 }
 

@@ -12,6 +12,7 @@ void FlappyGame::reset() {
     gravity = 0.4f;
     lift = -5.5f;
     isGameOver = false;
+    score = 0;
     prekazky.clear();
     spawn_next_Obstacle();
 }
@@ -26,6 +27,7 @@ void FlappyGame::spawn_next_Obstacle() {
     p.x = 320.0f;
     p.obstacleGapY = 30 + (random(0, 100)); 
     p.gapY = 65 + (random(0, 25));          
+    p.passed = false;
     prekazky.push_back(p);
 }
 
@@ -64,7 +66,7 @@ void FlappyGame::update() {
     float birdH = 16.0f;
     float pipeW = 30.0f;
 
-    for (const auto& p : prekazky) {
+    for (auto& p : prekazky) {
         if (birdX + birdW > p.x && birdX < p.x + pipeW) {
             float topPipeBottom = p.obstacleGapY;
             float bottomPipeTop = p.obstacleGapY + p.gapY;
@@ -72,6 +74,12 @@ void FlappyGame::update() {
             if (birdY < topPipeBottom || birdY + birdH > bottomPipeTop) {
                 isGameOver = true;
             }
+        }
+        
+        // Pokud pták překonal překážku (jeho X je větší než pravý okraj trubky) a ještě jsme to nezapočítali
+        if (!p.passed && birdX > p.x + pipeW) {
+            p.passed = true;
+            score++;
         }
     }
 }
@@ -82,6 +90,12 @@ void FlappyGame::draw() {
 
     // Vyčistíme paměť (Cyan = modré nebe)
     canvas->fillScreen(ST77XX_CYAN);
+
+    // Kreslení skóre
+    canvas->setTextColor(ST77XX_BLACK);
+    canvas->setTextSize(3);
+    canvas->setCursor(10, 10);
+    canvas->print(score);
 
     // Kreslení ptáčka (Žluté tělo, černé oko)
     float birdX = 50.0f;

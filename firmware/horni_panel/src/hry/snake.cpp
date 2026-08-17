@@ -7,6 +7,7 @@ SnakeGame::SnakeGame() {
 
 void SnakeGame::reset() {
     game_stopped = false;
+    score = 0;
     snake = {{16, 12}, {15, 12}, {14, 12}};
     direction = {1, 0}; // Doprava
     nove_jidlo();
@@ -46,6 +47,7 @@ void SnakeGame::update() {
     // Snědení jídla
     if (newHead.x == jidlo.x && newHead.y == jidlo.y) {
         snake.push_back({0, 0});
+        score++;
         nove_jidlo();
     }
 
@@ -64,6 +66,13 @@ void SnakeGame::draw() {
 
     // Vyčistíme paměť na černo
     canvas->fillScreen(ST77XX_BLACK);
+
+    // Kreslení skóre
+    canvas->setTextColor(ST77XX_WHITE);
+    canvas->setTextSize(2);
+    canvas->setCursor(5, 5);
+    canvas->print("Skore: ");
+    canvas->print(score);
 
     // Kreslení jídla (Červená)
     canvas->fillRect(jidlo.x * BLOCK_SIZE, jidlo.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, ST77XX_RED);
