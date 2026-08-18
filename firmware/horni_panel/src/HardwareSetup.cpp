@@ -117,11 +117,16 @@ bool setupSensors() {
         lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready, aby pin nekmital 100x za sekundu!
 
         // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU ---
-        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: Interrupt enable
+        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: Interrupt enable + high-pass filtr
         Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(0x00); Wire.endTransmission(); // WAKE_UP_DUR: 0
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x02); Wire.endTransmission(); // WAKE_UP_THS: 0x02 (jemnejsi citlivost na klepnuti)
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x01); Wire.endTransmission(); // WAKE_UP_THS: 0x01 (MAXIMÁLNÍ citlivost – reaguje i na nejjemnější dotyk/klepnutí)
         Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission(); // MD1_CFG: Vyvést Wake-up na pin INT1
-        Serial.println("[LSM6DS3]    Wake-up detekce narazu na INT1 aktivni.");
+        
+        #ifdef PIN_IMU_INT
+            pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
+        #endif
+        
+        Serial.println("[LSM6DS3]    Stredni citlivost probuzeni na INT1 aktivni (THS 0x14).");
     }
 #endif
 

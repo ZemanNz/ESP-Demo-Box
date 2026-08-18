@@ -14,6 +14,7 @@ Tato složka slouží jako přehledný registr technických problémů, na kter�
 | **06** | Oddělení datového stavu a fyzických ovladačů (Architecture) | Architektura C++ | [Zobrazit řešení (SystemState vs SensorManager)](05_oddeleni_systemstate_a_sensormanager.md) |
 | **07** | Řízení periferií dolního panelu čistě přes virtuální stav | Architektura / Abstrakce | [Zobrazit řešení (Virtuální stav)](06_rizeni_dolniho_panelu_pres_virtualni_stav.md) |
 | **08** | Architektura Master-Slave mezi dvěma mikrokontroléry ESP32 | Systémový návrh | [Zobrazit rozbor (Master-Slave ESP32)](07_architektura_master_slave_esp32.md) |
+| **09** | Úsporný režim Light Sleep a asynchronní probouzení (Wake-up) | Power Management / HW | [Zobrazit řešení (Light Sleep)](08_usporny_rezim_light_sleep_a_wake_up.md) |
 
 ---
 *Všechny dokumenty obsahují detailní technické zdůvodnění, matematické a paměťové souvislosti a zdrojové kódy přímo použitelné do textové části maturitní práce.*

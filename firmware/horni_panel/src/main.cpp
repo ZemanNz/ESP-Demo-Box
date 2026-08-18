@@ -5,7 +5,6 @@
 #include "SensorManager.h"
 #include "UartProtocol.h"
 #include "esp_sleep.h"
-#include <Wire.h>
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
@@ -233,22 +232,62 @@ void Task_Display_UI(void *pvParameters) {
             
             // =======================================================
             case MODE_SLEEP: {
-                if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    Serial.println("[SYSTEM] Spanek aktivni. Cekam na klepnuti...");
-                    #ifdef PIN_IMU_INT
-                        pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
-                    #endif
-                }
+                Serial.println("[SYSTEM] Prechazim do rezimu Light Sleep...");
 
-                delay = 100; // Kontrolujeme každých 100 ms
+                // 1. Zhasneme displej
+                gfx.clearScreen(ST77XX_BLACK);
 
-                #ifdef PIN_IMU_INT
-                if (digitalRead(PIN_IMU_INT) == HIGH) {
-                    Serial.println("[SYSTEM] Detekovano klepnuti! Probouzim se...");
-                    globalState.setMode(MODE_MAIN_MENU);
-                }
+                // 2. Vyprázdníme sériové buffery před uspáním
+                Serial.flush();
+                #ifdef ENABLE_UART_ESP
+                    SerialESP.flush();
                 #endif
+
+                // 3. Nastavení všech 3 hardwarových zdrojů probuzení:
+                // A) Horní tlačítko 1 (stisk spojí na GND = LOW)
+                #ifdef PIN_BTN1
+                    gpio_wakeup_enable((gpio_num_t)PIN_BTN1, GPIO_INTR_LOW_LEVEL);
+                #endif
+
+                // B) Akcelerometr LSM6DS3 (INT1 na GPIO 45 – impuls HIGH při otřesu/klepnutí)
+                #ifdef PIN_IMU_INT
+                    gpio_wakeup_enable((gpio_num_t)PIN_IMU_INT, GPIO_INTR_HIGH_LEVEL);
+                #endif
+
+                // Povolení GPIO probuzení (tlačítko + akcelerometr)
+                esp_sleep_enable_gpio_wakeup();
+
+                // C) UART z dolního panelu (UART1 – jakákoliv aktivita zdola)
+                #ifdef ENABLE_UART_ESP
+                    esp_sleep_enable_uart_wakeup(1);
+                #endif
+
+                // 4. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
+                // (Procesor zastaví hodiny, minimální odběr proudu, RAM zůstává plně zachována)
+                esp_light_sleep_start();
+
+                // ===================================================
+                // 5. PROBUZENÍ! (Kód pokračuje okamžitě zde)
+                // ===================================================
+                esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
+                Serial.printf("[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
+                if (duvod == ESP_SLEEP_WAKEUP_GPIO) {
+                    Serial.println("PROBUZENO TLACITKEM NEBO OTRESEM (GPIO)");
+                } else if (duvod == ESP_SLEEP_WAKEUP_UART) {
+                    Serial.println("PROBUZENO Z DOLNIHO PANELU (UART)");
+                } else {
+                    Serial.printf("PROBUZENO JINYM ZDROJEM: %d\n", (int)duvod);
+                }
+
+                // Krátká prodleva na stabilizaci po probuzení
+                vTaskDelay(pdMS_TO_TICKS(100));
+
+                // Vrátíme se do předchozího módu (pokud byl předchozí mód na konci demo cyklu, začneme od Menu)
+                AppMode returnMode = globalState.getLastMode();
+                if (returnMode == MODE_SLEEP || returnMode == MODE_BAREVNY) {
+                    returnMode = MODE_MAIN_MENU;
+                }
+                globalState.setMode(returnMode);
                 break;
             }
 

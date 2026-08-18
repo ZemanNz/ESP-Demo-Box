@@ -200,7 +200,9 @@ public:
 
     void setMode(AppMode newMode) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
-            lastMode = currentMode;
+            if (currentMode != MODE_SLEEP) {
+                lastMode = currentMode; // Ukládáme jen platný pracovní mód
+            }
             currentMode = newMode;
             uiNeedsUpdate = true;
             bottomNeedsTx = true;
