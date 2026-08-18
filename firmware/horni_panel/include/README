@@ -20,6 +20,7 @@ V souboru `config.h` lze jednotlivé moduly zapínat nebo vypínat odkomentován
 | **HC-SR04 TRIG** | GPIO **4**   | Ultrazvuk – Trigger pulz (10 µs HIGH)       |
 | **HC-SR04 ECHO** | GPIO **18**  | Ultrazvuk – Echo vstup (3.3 V logic)        |
 | **IR Senzor 1**  | GPIO **38**  | Digitální detekce překážky (LOW = detekce)  |
+| **LSM6DS3 INT1** | GPIO **45**  | Přerušení akcelerometru pro probuzení otřesem (GPIO 45) |
 | **Tlačítko 1**   | GPIO **47**  | INPUT_PULLUP (GND při stisku)               |
 | **Tlačítko 2**   | GPIO **48**  | INPUT_PULLUP (Reset desky)                  |
 

@@ -3,10 +3,12 @@
 #include <Wire.h>
 #include <SPI.h>
 
-// --- Displej ---
 #include "GraphicsManager.h"
 // Objekt gfx je deklarován v GraphicsManager.h a vytvořen v GraphicsManager.cpp, 
 // takže ho tu nemusíme vytvářet znovu.
+
+// Globální instance UART1 pro komunikaci se spodním panelem
+HardwareSerial SerialESP(1);
 
 // --- Senzory a periferie ---
 #if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
@@ -95,9 +97,31 @@ bool setupSensors() {
 
     // --- 2. Složité I2C Senzory (s možností selhání) ---
 #ifdef ENABLE_LSM6DS3
-    if (!lsm6ds3.begin_I2C(0x6A) && !lsm6ds3.begin_I2C(0x6B)) {
-        drawErrorScreen("LSM6DS3 Gyroskop neodpovida!");
-        return false;
+    bool lsmOk = false;
+    uint8_t lsmAddr = 0x6B;
+    if (lsm6ds3.begin_I2C(0x6B)) {
+        lsmOk = true;
+        lsmAddr = 0x6B;
+        Serial.println("[LSM6DS3]    OK – Wire 0x6B");
+    } else if (lsm6ds3.begin_I2C(0x6A)) {
+        lsmOk = true;
+        lsmAddr = 0x6A;
+        Serial.println("[LSM6DS3]    OK – Wire 0x6A");
+    } else {
+        Serial.println("[LSM6DS3]    VAROVANI: Senzor neodpovida!");
+    }
+
+    if (lsmOk) {
+        lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
+        lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+        lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready, aby pin nekmital 100x za sekundu!
+
+        // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU ---
+        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: Interrupt enable
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(0x00); Wire.endTransmission(); // WAKE_UP_DUR: 0
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x02); Wire.endTransmission(); // WAKE_UP_THS: 0x02 (jemnejsi citlivost na klepnuti)
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission(); // MD1_CFG: Vyvést Wake-up na pin INT1
+        Serial.println("[LSM6DS3]    Wake-up detekce narazu na INT1 aktivni.");
     }
 #endif
 
@@ -183,6 +207,10 @@ bool setupWiFi() {
 
 bool setupUART() {
     Serial.println("[SETUP] Inicializace UART komunikace...");
+#ifdef ENABLE_UART_ESP
+    SerialESP.begin(UART_ESP_BAUD, SERIAL_8N1, UART_ESP_RX, UART_ESP_TX);
+    Serial.println("[SETUP] SerialESP (UART1) spusten na 115200 baud.");
+#endif
     return true;
 }
 

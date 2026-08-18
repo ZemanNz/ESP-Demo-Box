@@ -18,17 +18,17 @@
 //#define ENABLE_ULTRASONIC     // Ultrazvukový senzor HC-SR04
 //#define ENABLE_IR_SENSORS     // IR digitální senzory (2x)
 //#define ENABLE_PHOTORESISTORS // Analogové fotorezistory (2x)
-//#define ENABLE_BUTTONS        // Tlačítka (2x)
+#define ENABLE_BUTTONS        // Tlačítka (2x)
 //#define ENABLE_BUZZER         // Pasivní bzučák
 //#define ENABLE_LEDS           // Jednoduché LED diody (3x)
 //#define ENABLE_WS2812B        // Adresovatelný LED pásek WS2812B (FastLED)
 //#define ENABLE_74HC595        // Sedmisegmentový displej přes 74HC595 (bit-banging)
 #define ENABLE_TFT_ST7789     // TFT 2.8" displej ST7789 (SPI, Adafruit_ST7789)
-//#define ENABLE_LSM6DS3        // Gyroskop/akcelerometr LSM6DS3 (I2C_0)
+#define ENABLE_LSM6DS3        // Gyroskop/akcelerometr LSM6DS3 (I2C_0)
 //#define ENABLE_LCD1602        // LCD displej 16x2 (I2C_0, adresa 0x27)
 //#define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
 //#define ENABLE_TCS34725       // Barevný senzor TCS34725 (I2C_1/Wire1, 0x29)
-//#define ENABLE_UART_ESP       // UART komunikace s druhým ESP32
+#define ENABLE_UART_ESP       // UART komunikace s druhým ESP32
 
 // =============================================================================
 //  MAPA PINŮ
@@ -46,6 +46,7 @@
 #define PIN_ULTRASONIC_TRIG   4   // HC-SR04 Trigger (GPIO 4)
 #define PIN_ULTRASONIC_ECHO  18   // HC-SR04 Echo (přesunuto z GPIO 20 – 20 je vnitřní USB D+ pin!)
 #define PIN_IR1              38   // IR Senzor 1 (přesunuto z GPIO 37 – 37 je Octal Flash pin!)
+#define PIN_IMU_INT          45   // LSM6DS3 INT1 – Přerušení na bezpečném pinu GPIO 45 (GPIO 33-37 jsou Octal Flash/PSRAM!)
 #define PIN_BTN1             47   // Tlačítko 1 (INPUT_PULLUP)
 #define PIN_BTN2             48   // Tlačítko 2 / Reset (INPUT_PULLUP)
 

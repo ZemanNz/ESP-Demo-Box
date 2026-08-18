@@ -265,16 +265,4 @@ void SensorManager::writeLCD1602(const char* line1, const char* line2) {
         lcd.print(line2);
     }
 #endif
-
-////////////////////////////////////////////////
-void setBottomServo(uint8_t angle){
-    global.state.updateServo(angle);
-    global.state.popBottomNeedsTx(true);
-}
-void setBottomSmartServo(int16_t angle);
-void setBottomMotor(int16_t speed);
-void setBottomContinuousServo(int8_t speed);
-void setBottomLedStrip(const uint32_t leds[8], uint8_t brightness);
-void setBottomOledText();
-///////////////////////////////////////////////
 }

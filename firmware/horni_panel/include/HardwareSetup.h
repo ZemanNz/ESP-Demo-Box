@@ -17,4 +17,7 @@ bool setupUART();
 // Tuto jedinou funkci zavoláš v main.cpp
 bool initializeAllHardware();
 
+// Globální instance sériové linky pro komunikaci se spodním panelem (UART1)
+extern HardwareSerial SerialESP;
+
 #endif // HARDWARE_SETUP_H

@@ -4,6 +4,8 @@
 #include "GraphicsManager.h"
 #include "SensorManager.h"
 #include "UartProtocol.h"
+#include "esp_sleep.h"
+#include <Wire.h>
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
@@ -67,10 +69,13 @@ void Task_UART_Simulator(void *pvParameters) {
         }
 
         // --- PŘEPÍNÁNÍ MÓDŮ ---
-        if (timeInMode >= 6000) {
+        if (current == MODE_SLEEP) {
+            timeInMode = 0; // Ve spánku neposouváme čas, čekáme na probuzení
+        }
+        else if (timeInMode >= 6000) {
             timeInMode = 0;
             int nextMode = (int)current + 1;
-            if (nextMode > MODE_BAREVNY) {
+            if (nextMode > MODE_SLEEP) {
                 nextMode = MODE_MAIN_MENU;
             }
             Serial.printf("[DEMO] Prepinam na mod: %d\n", nextMode);
@@ -192,10 +197,16 @@ void Task_Sensors(void *pvParameters) {
     Serial.println(xPortGetCoreID());
 
     for (;;) {
-        // Čtení všech aktivních senzorů a zápis do globalState s vlastním časováním
-        sensorManager.updateAll();
+        AppMode currentMode = globalState.getMode();
 
-        vTaskDelay(pdMS_TO_TICKS(10)); // Perioda 10 ms (rychlé vstupy 50 Hz, pomalé se filtrují)
+        if (currentMode == MODE_SLEEP) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        // Čtení všech aktivních senzorů v běžném provozu
+        sensorManager.updateAll();
+        vTaskDelay(pdMS_TO_TICKS(10)); // Perioda 10 ms
     }
 }
 
@@ -221,6 +232,26 @@ void Task_Display_UI(void *pvParameters) {
         switch (currentMode) {
             
             // =======================================================
+            case MODE_SLEEP: {
+                if (needsFullRedraw) {
+                    gfx.clearScreen(ST77XX_BLACK);
+                    Serial.println("[SYSTEM] Spanek aktivni. Cekam na klepnuti...");
+                    #ifdef PIN_IMU_INT
+                        pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
+                    #endif
+                }
+
+                delay = 100; // Kontrolujeme každých 100 ms
+
+                #ifdef PIN_IMU_INT
+                if (digitalRead(PIN_IMU_INT) == HIGH) {
+                    Serial.println("[SYSTEM] Detekovano klepnuti! Probouzim se...");
+                    globalState.setMode(MODE_MAIN_MENU);
+                }
+                #endif
+                break;
+            }
+
             case MODE_MAIN_MENU:
 
                 delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
@@ -371,12 +402,9 @@ void setup() {
     delay(1000);
     Serial.println("\n--- ESP-Demo-Box: Boot systemu ---");
 
-    // Zde se zavolá obrovský setup všech modulů
+    // Zde se zavolá setup všech modulů
     if (!initializeAllHardware()) {
-        Serial.println("SYSTEM ZASTAVEN KVULI CHYBE HARDWARU!");
-        while (true) {
-            delay(1000); // Zablokujeme start FreeRTOS, pokud HW selhal
-        }
+        Serial.println("[VAROVANI] Nektery modul selhal, presto pokracuji ve startu systemu...");
     }
 
     snake.reset();
@@ -386,17 +414,17 @@ void setup() {
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
     xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 4096, NULL, 1, NULL, 0); // Core 0
-    xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 2048, NULL, 2, NULL, 0); // Core 0 (priorita 2 = vyšší než web)
+    xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0
     
-    xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 4096, NULL, 1, NULL, 1); // Core 1
-    xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 2048, NULL, 1, NULL, 1); // Core 1
+    xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 8192, NULL, 1, NULL, 1); // Core 1
+    xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 4096, NULL, 1, NULL, 1); // Core 1
 
-    Serial.println("Vsechna vlakna spustena, mazu hlavni smycku (loop)");
+    Serial.println("Vsechna vlakna spustena!");
 }
 
 // ---------------------------------------------------------
-// Smyčku loop() už nepotřebujeme, vše řídí FreeRTOS Tasks
+// Smyčka loop()
 // ---------------------------------------------------------
 void loop() {
-    vTaskDelete(NULL); // Smaže tento původní Arduino loop task a uvolní paměť
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }

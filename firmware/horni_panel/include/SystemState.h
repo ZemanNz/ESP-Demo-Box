@@ -18,7 +18,8 @@ enum AppMode {
     MODE_WIFI_SPOJENI,
     MODE_SERVA,
     MODE_MOTOR,
-    MODE_BAREVNY
+    MODE_BAREVNY,
+    MODE_SLEEP
 };
 
 // ---------------------------------------------------------
@@ -116,6 +117,7 @@ struct SensorData {
 class SystemState {
 private:
     AppMode currentMode;
+    AppMode lastMode;
     int menuCursorIndex;
     SensorData sensors;
     bool uiNeedsUpdate;
@@ -125,6 +127,7 @@ private:
 public:
     SystemState() {
         currentMode = MODE_MAIN_MENU;
+        lastMode = MODE_MAIN_MENU;
         menuCursorIndex = 0;
         uiNeedsUpdate = true;
         bottomNeedsTx = true;
@@ -140,6 +143,15 @@ public:
         AppMode mode = MODE_MAIN_MENU;
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             mode = currentMode;
+            xSemaphoreGive(stateMutex);
+        }
+        return mode;
+    }
+
+    AppMode getLastMode() {
+        AppMode mode = MODE_MAIN_MENU;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            mode = lastMode;
             xSemaphoreGive(stateMutex);
         }
         return mode;
@@ -188,6 +200,7 @@ public:
 
     void setMode(AppMode newMode) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            lastMode = currentMode;
             currentMode = newMode;
             uiNeedsUpdate = true;
             bottomNeedsTx = true;
