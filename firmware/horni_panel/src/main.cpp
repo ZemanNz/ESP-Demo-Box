@@ -8,6 +8,7 @@
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
+#include "wifi/WebManager.h"
 
 // ---------------------------------------------------------
 // Fyzická instance Globálního Stavu (paměť)
@@ -16,6 +17,7 @@ SystemState globalState;
 SnakeGame snake;
 FlappyGame flappy;
 Game2048 g2048;
+WebManager webManager;
 
 // ---------------------------------------------------------
 // 1. Task: Wi-Fi a WebServer (Poběží na Core 0)
@@ -24,8 +26,12 @@ void Task_WiFi_Web(void *pvParameters) {
     Serial.print("Task_WiFi_Web bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
+    // Spuštění SoftAP, Captive Portalu, WebServeru a WebSocketu
+    webManager.begin(&globalState);
+
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        webManager.update();
+        vTaskDelay(pdMS_TO_TICKS(15));
     }
 }
 
@@ -82,6 +88,8 @@ void Task_UART_Simulator(void *pvParameters) {
         }
     }
 }
+
+
 void Task_UART(void *pvParameters) {
     unsigned long lastSendTime = 0;
     
@@ -452,7 +460,7 @@ void setup() {
     // Vytváření úloh (Tasks) pro FreeRTOS.
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
-    xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 4096, NULL, 1, NULL, 0); // Core 0
+    xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 8192, NULL, 1, NULL, 0); // Core 0
     xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0
     
     xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 8192, NULL, 1, NULL, 1); // Core 1

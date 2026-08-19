@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ESP-Demo-Box</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo-area">
+            <span class="logo-icon">⚡</span>
+            <div>
+                <h1>ESP-Demo-Box</h1>
+                <p class="subtitle">Bezdrátový řídicí panel</p>
+            </div>
+        </div>
+        <div id="status-badge" class="status-badge connecting">
+            <span class="dot"></span>
+            <span id="status-text">Připojování...</span>
+        </div>
+    </header>
+
+    <nav class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('telemetry')">📊 Telemetrie</button>
+        <button class="tab-btn" onclick="switchTab('control')">🎛️ Ovládání</button>
+        <button class="tab-btn" onclick="switchTab('system')">⚙️ Systém</button>
+    </nav>
+
+    <main class="container">
+        <!-- ==================== ZÁLOŽKA: TELEMETRIE ==================== -->
+        <section id="tab-telemetry" class="tab-content active">
+            <!-- Prostředí -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🌡️</span>
+                    <h3>Klima a Prostředí</h3>
+                </div>
+                <div class="grid-2">
+                    <div class="metric-box">
+                        <span class="metric-label">Teplota</span>
+                        <span class="metric-value"><span id="val-temp">--</span> °C</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Vlhkost</span>
+                        <span class="metric-value"><span id="val-hum">--</span> %</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vzdálenostní senzory -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">📏</span>
+                    <h3>Senzory vzdálenosti</h3>
+                </div>
+                <div class="grid-3">
+                    <div class="metric-box">
+                        <span class="metric-label">Laser (ToF)</span>
+                        <span class="metric-value"><span id="val-laser">--</span> mm</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Ultrazvuk</span>
+                        <span class="metric-value"><span id="val-ultra">--</span> cm</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">IR Senzor</span>
+                        <span class="metric-value"><span id="val-ir">--</span> cm</span>
+                    </div>
+                </div>
+                <div class="sub-metric mt-2">
+                    <span>IR Překážka:</span>
+                    <span id="val-ir-obs" class="tag">Není</span>
+                </div>
+            </div>
+
+            <!-- Pohyb & IMU -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🧭</span>
+                    <h3>Pohyb & IMU (LSM6DS3)</h3>
+                </div>
+                <div class="imu-container">
+                    <div>
+                        <div class="imu-title">Akcelerometr [g]</div>
+                        <div class="grid-3 text-center">
+                            <div class="imu-val">X: <b id="val-ax">0.00</b></div>
+                            <div class="imu-val">Y: <b id="val-ay">0.00</b></div>
+                            <div class="imu-val">Z: <b id="val-az">0.00</b></div>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <div class="imu-title">Gyroskop [°/s]</div>
+                        <div class="grid-3 text-center">
+                            <div class="imu-val">X: <b id="val-gx">0.00</b></div>
+                            <div class="imu-val">Y: <b id="val-gy">0.00</b></div>
+                            <div class="imu-val">Z: <b id="val-gz">0.00</b></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Světlo a Barvy -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🎨</span>
+                    <h3>Světlo & Barva</h3>
+                </div>
+                <div class="grid-2">
+                    <div class="metric-box">
+                        <span class="metric-label">Fotorezistor 1</span>
+                        <span class="metric-value" id="val-photo1">--</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">Fotorezistor 2</span>
+                        <span class="metric-value" id="val-photo2">--</span>
+                    </div>
+                </div>
+                <div class="color-preview-box mt-2">
+                    <div id="color-preview" class="color-circle"></div>
+                    <div class="color-text">
+                        <span>R: <b id="val-cr">0</b>, G: <b id="val-cg">0</b>, B: <b id="val-cb">0</b></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vstupy a Tlačítka -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🕹️</span>
+                    <h3>Vstupy & Tlačítka</h3>
+                </div>
+                <div class="inputs-grid">
+                    <div><b>Joystick:</b> X=<span id="val-jx">0</span>, Y=<span id="val-jy">0</span> <span id="val-jbtn" class="tag">UP</span></div>
+                    <div><b>Potenciometr:</b> <span id="val-pot">0</span></div>
+                    <div><b>Enkodér:</b> <span id="val-enc">0</span> <span id="val-ebtn" class="tag">UP</span></div>
+                    <div><b>Horní tlačítko:</b> <span id="val-btntop" class="tag">UP</span></div>
+                    <div><b>Přepínače:</b> SW1: <span id="val-sw1">OFF</span>, SW2: <span id="val-sw2">OFF</span></div>
+                    <div class="btn-group-down mt-1">
+                        <b>Spodní tlačítka:</b>
+                        <span id="btn-d1" class="key-pill">1</span>
+                        <span id="btn-d2" class="key-pill">2</span>
+                        <span id="btn-d3" class="key-pill">3</span>
+                        <span id="btn-d4" class="key-pill">4</span>
+                        <span id="btn-d5" class="key-pill">5</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== ZÁLOŽKA: OVLÁDÁNÍ ==================== -->
+        <section id="tab-control" class="tab-content">
+            <!-- Výběr Režimu -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">📱</span>
+                    <h3>Režim obrazovky ESP</h3>
+                </div>
+                <div class="mode-grid">
+                    <button class="mode-btn" onclick="setAppMode(0)">📋 Menu</button>
+                    <button class="mode-btn" onclick="setAppMode(1)">📈 Senzory</button>
+                    <button class="mode-btn" onclick="setAppMode(2)">🐍 Snake</button>
+                    <button class="mode-btn" onclick="setAppMode(3)">🐦 Flappy</button>
+                    <button class="mode-btn" onclick="setAppMode(4)">🔢 2048</button>
+                    <button class="mode-btn" onclick="setAppMode(5)">📐 Vzdálenost</button>
+                    <button class="mode-btn" onclick="setAppMode(7)">🦾 Serva</button>
+                    <button class="mode-btn" onclick="setAppMode(8)">⚙️ Motor</button>
+                    <button class="mode-btn" onclick="setAppMode(9)">🌈 Barvy</button>
+                    <button class="mode-btn btn-sleep" onclick="setAppMode(10)">💤 Spánek</button>
+                </div>
+            </div>
+
+            <!-- LED Diody -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">💡</span>
+                    <h3>Stavové LED Diody</h3>
+                </div>
+                <div class="led-controls">
+                    <div class="led-item">
+                        <span>LED 1</span>
+                        <label class="switch">
+                            <input type="checkbox" id="ctrl-led1" onchange="toggleLed(1, this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="led-item">
+                        <span>LED 2</span>
+                        <label class="switch">
+                            <input type="checkbox" id="ctrl-led2" onchange="toggleLed(2, this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="led-item">
+                        <span>LED 3</span>
+                        <label class="switch">
+                            <input type="checkbox" id="ctrl-led3" onchange="toggleLed(3, this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RGB LED Pásek WS2812B -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">✨</span>
+                    <h3>RGB LED Pásek</h3>
+                </div>
+                <div class="control-row">
+                    <label>Barva pásku:</label>
+                    <input type="color" id="ctrl-rgb-color" value="#ff0000" onchange="updateRgbStrip()">
+                </div>
+                <div class="control-row mt-2">
+                    <label>Jas: <b id="lbl-rgb-bright">60</b></label>
+                    <input type="range" id="ctrl-rgb-bright" min="0" max="255" value="60" oninput="updateRgbBright(this.value)">
+                </div>
+                <div class="color-presets mt-2">
+                    <button class="preset-btn" style="background:#ff0000;" onclick="setRgbPreset('#ff0000')"></button>
+                    <button class="preset-btn" style="background:#00ff00;" onclick="setRgbPreset('#00ff00')"></button>
+                    <button class="preset-btn" style="background:#0088ff;" onclick="setRgbPreset('#0088ff')"></button>
+                    <button class="preset-btn" style="background:#ffaa00;" onclick="setRgbPreset('#ffaa00')"></button>
+                    <button class="preset-btn" style="background:#ff00ff;" onclick="setRgbPreset('#ff00ff')"></button>
+                    <button class="preset-btn" style="background:#ffffff;" onclick="setRgbPreset('#ffffff')"></button>
+                    <button class="preset-btn" style="background:#000000;" onclick="setRgbPreset('#000000')"></button>
+                </div>
+            </div>
+
+            <!-- Serva a Motory -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">⚙️</span>
+                    <h3>Pohony & Serva</h3>
+                </div>
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span>Klasické Servo (0–180°):</span>
+                        <b id="lbl-servo">90°</b>
+                    </div>
+                    <input type="range" id="ctrl-servo" min="0" max="180" value="90" oninput="onServoChange(this.value)">
+                </div>
+
+                <div class="slider-group mt-2">
+                    <div class="slider-header">
+                        <span>Chytré Servo (-180° až +180°):</span>
+                        <b id="lbl-smartservo">0°</b>
+                    </div>
+                    <input type="range" id="ctrl-smartservo" min="-180" max="180" value="0" oninput="onSmartServoChange(this.value)">
+                </div>
+
+                <div class="slider-group mt-2">
+                    <div class="slider-header">
+                        <span>Motor / PWM Rychlost:</span>
+                        <b id="lbl-motor">0</b>
+                    </div>
+                    <input type="range" id="ctrl-motor" min="-255" max="255" value="0" oninput="onMotorChange(this.value)">
+                    <div class="text-center mt-1">
+                        <button class="btn-sm" onclick="stopMotor()">⏹ Zastavit motor</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bzučák -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🔔</span>
+                    <h3>Bzučák</h3>
+                </div>
+                <div class="buzzer-actions">
+                    <button class="action-btn" onclick="beep(1000, 200)">🔊 Pípnout (1 kHz)</button>
+                    <button class="action-btn" onclick="beep(2000, 200)">🔊 Pípnout (2 kHz)</button>
+                    <button class="action-btn" onclick="beep(500, 400)">📢 Hluboký tón</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== ZÁLOŽKA: SYSTÉM ==================== -->
+        <section id="tab-system" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">ℹ️</span>
+                    <h3>Systémové informace</h3>
+                </div>
+                <div class="sys-info-table">
+                    <div class="sys-row"><span>Aktuální mód ESP:</span><b id="sys-mode">--</b></div>
+                    <div class="sys-row"><span>Uptime ESP32:</span><b id="sys-uptime">0s</b></div>
+                    <div class="sys-row"><span>Volná paměť (Heap):</span><b id="sys-heap">-- KB</b></div>
+                    <div class="sys-row"><span>Klienti WebSocket:</span><b id="sys-clients">1</b></div>
+                    <div class="sys-row"><span>Wi-Fi SSID:</span><b>ESP-Demo-Box</b></div>
+                    <div class="sys-row"><span>IP adresa:</span><b>192.168.4.1</b></div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <span>ESP-Demo-Box © 2026</span>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
