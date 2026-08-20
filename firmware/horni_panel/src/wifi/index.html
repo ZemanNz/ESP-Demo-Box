@@ -1,12 +1,21 @@
 <!DOCTYPE html>
 <html lang="cs">
 <head>
+    <!-- Nastavení kódování znaků na UTF-8 (aby fungovala česká diakritika: háčky a čárky) -->
     <meta charset="UTF-8">
+    
+    <!-- Nastavení měřítka zobrazení na mobilu: šířka odpovídá zařízení, zakázáno nechtěné přibližování -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
     <title>ESP-Demo-Box</title>
+    
+    <!-- Odkaz na externí soubor s kaskádovými styly (vzhled, barvy, písmo) -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- ========================================================================= -->
+    <!-- HORNY LIŠTA (HEADER) S LOGEM A INDIKÁTOREM STAVU SPOJENÍ -->
+    <!-- ========================================================================= -->
     <header class="app-header">
         <div class="logo-area">
             <span class="logo-icon">⚡</span>
@@ -15,22 +24,35 @@
                 <p class="subtitle">Bezdrátový řídicí panel</p>
             </div>
         </div>
+        
+        <!-- Odznáček stavu WebSocketu: zelená = Online, žlutá = Připojování, červená = Odpojeno -->
         <div id="status-badge" class="status-badge connecting">
             <span class="dot"></span>
             <span id="status-text">Připojování...</span>
         </div>
     </header>
 
+    <!-- ========================================================================= -->
+    <!-- NAVIGAČNÍ TLAČÍTKA PRO PŘEPÍNÁNÍ ZÁLOŽEK -->
+    <!-- ========================================================================= -->
     <nav class="tab-bar">
+        <!-- Po kliknutí zavolá JavaScriptovou funkci switchTab() pro zobrazení danej sekce -->
         <button class="tab-btn active" onclick="switchTab('telemetry')">📊 Telemetrie</button>
         <button class="tab-btn" onclick="switchTab('control')">🎛️ Ovládání</button>
         <button class="tab-btn" onclick="switchTab('system')">⚙️ Systém</button>
     </nav>
 
+    <!-- ========================================================================= -->
+    <!-- HLAVNÍ OBSAH (KONTEJNER SE ZÁLOŽKAMI) -->
+    <!-- ========================================================================= -->
     <main class="container">
-        <!-- ==================== ZÁLOŽKA: TELEMETRIE ==================== -->
+
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 1: TELEMETRIE (ŽIVÉ ZOBRAZENÍ HODNOT ZE SENZORŮ) -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-telemetry" class="tab-content active">
-            <!-- Prostředí -->
+            
+            <!-- Karta: Teplota a Vlhkost (DHT11) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🌡️</span>
@@ -39,16 +61,18 @@
                 <div class="grid-2">
                     <div class="metric-box">
                         <span class="metric-label">Teplota</span>
+                        <!-- ID pro dynamický přepis z JavaScriptu: val-temp -->
                         <span class="metric-value"><span id="val-temp">--</span> °C</span>
                     </div>
                     <div class="metric-box">
                         <span class="metric-label">Vlhkost</span>
+                        <!-- ID pro dynamický přepis z JavaScriptu: val-hum -->
                         <span class="metric-value"><span id="val-hum">--</span> %</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Vzdálenostní senzory -->
+            <!-- Karta: Senzory vzdálenosti (Laser ToF, Ultrazvuk, IR) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📏</span>
@@ -74,7 +98,7 @@
                 </div>
             </div>
 
-            <!-- Pohyb & IMU -->
+            <!-- Karta: Pohybový senzor IMU (Gyroskop a Akcelerometr LSM6DS3) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🧭</span>
@@ -100,7 +124,7 @@
                 </div>
             </div>
 
-            <!-- Světlo a Barvy -->
+            <!-- Karta: Světlo (Fotorezistory) a Barevný senzor (TCS34725) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🎨</span>
@@ -116,6 +140,7 @@
                         <span class="metric-value" id="val-photo2">--</span>
                     </div>
                 </div>
+                <!-- Náhled změřené barvy se dynamicky vybarvuje v JavaScriptu -->
                 <div class="color-preview-box mt-2">
                     <div id="color-preview" class="color-circle"></div>
                     <div class="color-text">
@@ -124,7 +149,7 @@
                 </div>
             </div>
 
-            <!-- Vstupy a Tlačítka -->
+            <!-- Karta: Fyzické vstupy (Joystick, Enkodér, Potenciometr, Tlačítka) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🕹️</span>
@@ -148,9 +173,12 @@
             </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA: OVLÁDÁNÍ ==================== -->
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 2: OVLÁDÁNÍ (OVLÁDACÍ PRVKY PRO SERVA, LEDKY, MOTORY, MÓDY) -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-control" class="tab-content">
-            <!-- Výběr Režimu -->
+            
+            <!-- Výběr aktivního módu obrazovky na ESP32 -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📱</span>
@@ -170,7 +198,7 @@
                 </div>
             </div>
 
-            <!-- LED Diody -->
+            <!-- Přepínače 3x stavových LED diod -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">💡</span>
@@ -201,20 +229,23 @@
                 </div>
             </div>
 
-            <!-- RGB LED Pásek WS2812B -->
+            <!-- Ovládání RGB LED pásku WS2812B -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">✨</span>
                     <h3>RGB LED Pásek</h3>
                 </div>
+                <!-- Paleta barev (Color picker) -->
                 <div class="control-row">
                     <label>Barva pásku:</label>
                     <input type="color" id="ctrl-rgb-color" value="#ff0000" onchange="updateRgbStrip()">
                 </div>
+                <!-- Posuvník jasu -->
                 <div class="control-row mt-2">
                     <label>Jas: <b id="lbl-rgb-bright">60</b></label>
                     <input type="range" id="ctrl-rgb-bright" min="0" max="255" value="60" oninput="updateRgbBright(this.value)">
                 </div>
+                <!-- Rychlá tlačítka barevných předvoleb -->
                 <div class="color-presets mt-2">
                     <button class="preset-btn" style="background:#ff0000;" onclick="setRgbPreset('#ff0000')"></button>
                     <button class="preset-btn" style="background:#00ff00;" onclick="setRgbPreset('#00ff00')"></button>
@@ -226,12 +257,13 @@
                 </div>
             </div>
 
-            <!-- Serva a Motory -->
+            <!-- Posuvníky pro Serva a Motor -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">⚙️</span>
                     <h3>Pohony & Serva</h3>
                 </div>
+                <!-- Klasické servo 0 až 180 stupňů -->
                 <div class="slider-group">
                     <div class="slider-header">
                         <span>Klasické Servo (0–180°):</span>
@@ -240,6 +272,7 @@
                     <input type="range" id="ctrl-servo" min="0" max="180" value="90" oninput="onServoChange(this.value)">
                 </div>
 
+                <!-- Chytré servo -180 až +180 stupňů -->
                 <div class="slider-group mt-2">
                     <div class="slider-header">
                         <span>Chytré Servo (-180° až +180°):</span>
@@ -248,6 +281,7 @@
                     <input type="range" id="ctrl-smartservo" min="-180" max="180" value="0" oninput="onSmartServoChange(this.value)">
                 </div>
 
+                <!-- Rychlost a směr motoru (-255 až +255) -->
                 <div class="slider-group mt-2">
                     <div class="slider-header">
                         <span>Motor / PWM Rychlost:</span>
@@ -260,7 +294,7 @@
                 </div>
             </div>
 
-            <!-- Bzučák -->
+            <!-- Ovládání bzučáku -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🔔</span>
@@ -274,7 +308,9 @@
             </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA: SYSTÉM ==================== -->
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 3: SYSTÉMOVÉ INFORMACE -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-system" class="tab-content">
             <div class="card">
                 <div class="card-header">
@@ -293,10 +329,12 @@
         </section>
     </main>
 
+    <!-- Patička webu -->
     <footer class="app-footer">
         <span>ESP-Demo-Box © 2026</span>
     </footer>
 
+    <!-- Načtení JavaScriptového skriptu pro spojení s WebSocketem -->
     <script src="script.js"></script>
 </body>
 </html>

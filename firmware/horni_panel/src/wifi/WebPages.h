@@ -4,8 +4,13 @@
 #include <Arduino.h>
 
 // =============================================================================
-// HTML5 DASHBOARD
+// TENTO SOUBOR UKLÁDÁ CELÝ WEB PŘÍMO DO FLASH PAMĚTI ESP32 (PROGMEM)
 // =============================================================================
+// Výhoda: Nemusí se nahrávat zvlášť souborový systém LittleFS. 
+// Web se nahraje společně s firmwarem jedním klikem tlačítka "Upload".
+// =============================================================================
+
+// --- 1. HTML5 ŠABLONA DASHBOARDU ---
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="cs">
@@ -16,6 +21,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <!-- Horní lišta s logem a indikátorem stavu -->
     <header class="app-header">
         <div class="logo-area">
             <span class="logo-icon">⚡</span>
@@ -30,6 +36,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </div>
     </header>
 
+    <!-- Navigační lišta záložek -->
     <nav class="tab-bar">
         <button class="tab-btn active" onclick="switchTab('telemetry')">📊 Telemetrie</button>
         <button class="tab-btn" onclick="switchTab('control')">🎛️ Ovládání</button>
@@ -37,9 +44,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     </nav>
 
     <main class="container">
-        <!-- ==================== ZÁLOŽKA: TELEMETRIE ==================== -->
+        <!-- ==================== ZÁLOŽKA 1: TELEMETRIE ==================== -->
         <section id="tab-telemetry" class="tab-content active">
-            <!-- Prostředí -->
+            <!-- Klima a Teplota -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🌡️</span>
@@ -57,7 +64,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Vzdálenostní senzory -->
+            <!-- Vzdálenosti -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📏</span>
@@ -83,7 +90,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Pohyb & IMU -->
+            <!-- IMU Senzor pohybu -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🧭</span>
@@ -109,7 +116,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Světlo a Barvy -->
+            <!-- Světlo a Barva -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🎨</span>
@@ -133,7 +140,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Vstupy a Tlačítka -->
+            <!-- Fyzické ovládací prvky a tlačítka -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🕹️</span>
@@ -157,9 +164,9 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA: OVLÁDÁNÍ ==================== -->
+        <!-- ==================== ZÁLOŽKA 2: OVLÁDÁNÍ ==================== -->
         <section id="tab-control" class="tab-content">
-            <!-- Výběr Režimu -->
+            <!-- Výběr Režimu obrazovky -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📱</span>
@@ -179,7 +186,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- LED Diody -->
+            <!-- Stavové LED Diody -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">💡</span>
@@ -235,7 +242,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Serva a Motory -->
+            <!-- Servomotory a Motory -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">⚙️</span>
@@ -283,7 +290,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA: SYSTÉM ==================== -->
+        <!-- ==================== ZÁLOŽKA 3: SYSTÉM ==================== -->
         <section id="tab-system" class="tab-content">
             <div class="card">
                 <div class="card-header">
@@ -311,9 +318,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
 </html>
 )rawliteral";
 
-// =============================================================================
-// CSS STYLY
-// =============================================================================
+// --- 2. CSS STYLY (Tmavý motiv) ---
 const char STYLE_CSS[] PROGMEM = R"rawliteral(
 :root {
     --bg-color: #0f172a;
@@ -347,7 +352,7 @@ body {
     padding-bottom: 20px;
 }
 
-/* Header */
+/* Hlavička */
 .app-header {
     background: var(--card-bg);
     border-bottom: 1px solid var(--card-border);
@@ -417,7 +422,7 @@ body {
     background: var(--danger);
 }
 
-/* Tabs */
+/* Lišta záložek */
 .tab-bar {
     display: flex;
     background: #111827;
@@ -445,7 +450,7 @@ body {
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-/* Container & Cards */
+/* Kontejner karet */
 .container {
     padding: 16px;
     flex: 1;
@@ -489,7 +494,7 @@ body {
     font-size: 1.1rem;
 }
 
-/* Grids */
+/* Mřížky (Grid) */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -607,7 +612,7 @@ body {
     font-weight: bold;
 }
 
-/* Ovládací prvky */
+/* Tlačítka výběru módu */
 .mode-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -643,7 +648,7 @@ body {
     color: #fed7aa;
 }
 
-/* Slidery a Toggles */
+/* Přepínače LED diod */
 .led-controls {
     display: flex;
     justify-content: space-around;
@@ -771,7 +776,7 @@ input[type="range"] {
     cursor: pointer;
 }
 
-/* System info */
+/* Systémová tabulka */
 .sys-info-table {
     display: flex;
     flex-direction: column;
@@ -790,7 +795,7 @@ input[type="range"] {
 .mt-2 { margin-top: 10px; }
 .text-center { text-align: center; }
 
-/* Footer */
+/* Patička */
 .app-footer {
     text-align: center;
     font-size: 0.75rem;
@@ -799,9 +804,7 @@ input[type="range"] {
 }
 )rawliteral";
 
-// =============================================================================
-// JAVASCRIPT
-// =============================================================================
+// --- 3. JAVASCRIPT KLIENT ---
 const char SCRIPT_JS[] PROGMEM = R"rawliteral(
 let ws = null;
 let reconnectTimer = null;
@@ -864,7 +867,7 @@ function initWebSocket() {
                 const data = JSON.parse(event.data);
                 handleTelemetry(data);
             } catch (e) {
-                console.error('Chyba parsování zprávy:', e, event.data);
+                console.error('Chyba parsovani zpravy:', e, event.data);
             }
         };
     } catch (e) {

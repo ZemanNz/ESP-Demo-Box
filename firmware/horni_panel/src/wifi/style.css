@@ -1,24 +1,33 @@
+/* =============================================================================
+   KASKÁDOVÉ STYLY (CSS) PRO OVLÁDACÍ PANEL ESP-DEMO-BOX
+   =============================================================================
+   Tento soubor určuje barvy, písmo, velikosti, rozložení karet a animace webu.
+   Je navržen v moderním tmavém motivu (Dark Mode) pro skvělý vzhled na mobilu.
+   ============================================================================= */
+
+/* --- 1. DEFINICE GLOBÁLNÍCH BAREVNÝCH PROMĚNNÝCH (:root) --- */
 :root {
-    --bg-color: #0f172a;
-    --card-bg: #1e293b;
-    --card-border: #334155;
-    --primary: #38bdf8;
-    --primary-hover: #0ea5e9;
-    --accent: #6366f1;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --success: #22c55e;
-    --danger: #ef4444;
-    --warning: #f59e0b;
-    --radius: 12px;
+    --bg-color: #0f172a;       /* Tmavě modré pozadí celé stránky */
+    --card-bg: #1e293b;        /* Světlejší tmavé pozadí jednotlivých karet */
+    --card-border: #334155;    /* Barva jemného rámečku kolem karet */
+    --primary: #38bdf8;        /* Hlavní zvýrazňovací azurová barva */
+    --primary-hover: #0ea5e9;  /* Barva tlačítka při stisku */
+    --accent: #6366f1;         /* Sekundární fialová barva */
+    --text-main: #f8fafc;      /* Hlavní bílý text */
+    --text-muted: #94a3b8;     /* Šedý doplňkový text */
+    --success: #22c55e;        /* Zelená pro stav Online a úspěch */
+    --danger: #ef4444;         /* Červená pro odpojení a zastavení */
+    --warning: #f59e0b;        /* Žlutá pro varování a připojování */
+    --radius: 12px;            /* Poloměr zakulacení rohů karet a tlačítek */
 }
 
+/* Reseting okrajů a výchozího nastavení prvků */
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent; /* Vypne modré bliknutí při klepnutí prstem na mobilu */
 }
 
 body {
@@ -30,7 +39,7 @@ body {
     padding-bottom: 20px;
 }
 
-/* Header */
+/* --- 2. HORNÍ LIŠTA (HEADER) --- */
 .app-header {
     background: var(--card-bg);
     border-bottom: 1px solid var(--card-border);
@@ -38,7 +47,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    position: sticky;
+    position: sticky; /* Lišta zůstane přišpendlená nahoře i při skrolování */
     top: 0;
     z-index: 50;
 }
@@ -66,6 +75,7 @@ body {
     color: var(--text-muted);
 }
 
+/* Odznáček stavu spojení (Připojování / Online / Odpojeno) */
 .status-badge {
     display: flex;
     align-items: center;
@@ -83,6 +93,7 @@ body {
     background: var(--warning);
 }
 
+/* Stav Online (Zelené světlo) */
 .status-badge.online {
     background: rgba(34, 197, 94, 0.15);
     color: var(--success);
@@ -92,6 +103,7 @@ body {
     box-shadow: 0 0 8px var(--success);
 }
 
+/* Stav Odpojeno (Červené světlo) */
 .status-badge.offline {
     background: rgba(239, 68, 68, 0.15);
     color: var(--danger);
@@ -100,7 +112,7 @@ body {
     background: var(--danger);
 }
 
-/* Tabs */
+/* --- 3. LIŠTA ZÁLOŽEK --- */
 .tab-bar {
     display: flex;
     background: #111827;
@@ -122,13 +134,14 @@ body {
     transition: all 0.2s ease;
 }
 
+/* Aktivní záložka */
 .tab-btn.active {
     background: var(--card-bg);
     color: var(--primary);
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-/* Container & Cards */
+/* --- 4. KARTY A HLAVNÍ OBSAH --- */
 .container {
     padding: 16px;
     flex: 1;
@@ -138,15 +151,16 @@ body {
 }
 
 .tab-content {
-    display: none;
+    display: none; /* Neaktivní záložky skryjeme */
     flex-direction: column;
     gap: 14px;
 }
 
 .tab-content.active {
-    display: flex;
+    display: flex; /* Aktivní záložku zobrazíme */
 }
 
+/* Vzhled samostatné karty */
 .card {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
@@ -172,7 +186,7 @@ body {
     font-size: 1.1rem;
 }
 
-/* Grids */
+/* --- 5. ROZLOŽENÍ DATOVÝCH POLÍ (GRID) --- */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -214,6 +228,7 @@ body {
     justify-content: space-between;
 }
 
+/* Štítek / Visačka (nástrojový stav) */
 .tag {
     background: #334155;
     padding: 2px 8px;
@@ -290,7 +305,7 @@ body {
     font-weight: bold;
 }
 
-/* Ovládací prvky */
+/* --- 6. STYLOVÁNÍ OVLÁDACÍCH TLAČÍTEK --- */
 .mode-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -326,7 +341,7 @@ body {
     color: #fed7aa;
 }
 
-/* Slidery a Toggles */
+/* --- 7. DOTYKOVÉ PŘEPÍNAČE (SWITCHES FOR LEDS) --- */
 .led-controls {
     display: flex;
     justify-content: space-around;
@@ -454,7 +469,7 @@ input[type="range"] {
     cursor: pointer;
 }
 
-/* System info */
+/* --- 8. SYSTÉMOVÁ TABULKA --- */
 .sys-info-table {
     display: flex;
     flex-direction: column;
@@ -473,7 +488,7 @@ input[type="range"] {
 .mt-2 { margin-top: 10px; }
 .text-center { text-align: center; }
 
-/* Footer */
+/* Patička */
 .app-footer {
     text-align: center;
     font-size: 0.75rem;
