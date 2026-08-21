@@ -71,6 +71,11 @@ void drawErrorScreen(String errorMessage) {
 // ---------------------------------------------------------
 bool setupDisplay() {
 #ifdef ENABLE_TFT_ST7789
+    #ifdef PIN_TFT_LED
+        pinMode(PIN_TFT_LED, OUTPUT);
+        digitalWrite(PIN_TFT_LED, HIGH);
+    #endif
+
     // SPI Sběrnici musí zapnout HardwareSetup jako hlavní dirigent hardware
     SPI.begin(PIN_TFT_SCLK, PIN_TFT_MISO, PIN_TFT_MOSI, PIN_TFT_CS);
     

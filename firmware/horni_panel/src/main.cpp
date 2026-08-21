@@ -242,16 +242,46 @@ void Task_Display_UI(void *pvParameters) {
             case MODE_SLEEP: {
                 Serial.println("[SYSTEM] Prechazim do rezimu Light Sleep...");
 
-                // 1. Zhasneme displej
-                gfx.clearScreen(ST77XX_BLACK);
 
-                // 2. Vyprázdníme sériové buffery před uspáním
+                // 1. Zhasneme displej a vypneme jeho podsvícení
+                gfx.clearScreen(ST77XX_BLACK);
+                #ifdef PIN_TFT_LED
+                    digitalWrite(PIN_TFT_LED, LOW);
+                #endif
+
+                // 2. Vypneme 3x LED diody na horním panelu
+                #ifdef ENABLE_LEDS
+                    sensorManager.setLeds(false, false, false);
+                #endif
+
+                // 3. Zhasneme 8-LED WS2812B pásek
+                #ifdef ENABLE_WS2812B
+                    uint32_t offLeds[8] = {0};
+                    sensorManager.setLedStrip(offLeds, 0);
+                #endif
+
+                // 4. Vypneme bzučák
+                #ifdef ENABLE_BUZZER
+                    sensorManager.setBuzzer(false, 0);
+                #endif
+
+                // 5. Zhasneme 7-segmentový displej
+                #ifdef ENABLE_74HC595
+                    sensorManager.set7Segment(-1);
+                #endif
+
+                // 6. Zhasneme I2C LCD 1602 displej a jeho podsvícení
+                #ifdef ENABLE_LCD1602
+                    sensorManager.setLCDBacklight(false);
+                #endif
+
+                // 7. Vyprázdníme sériové buffery před uspáním
                 Serial.flush();
                 #ifdef ENABLE_UART_ESP
                     SerialESP.flush();
                 #endif
 
-                // 3. Nastavení všech 3 hardwarových zdrojů probuzení:
+                // 8. Nastavení všech 3 hardwarových zdrojů probuzení:
                 // A) Horní tlačítko 1 (stisk spojí na GND = LOW)
                 #ifdef PIN_BTN1
                     gpio_wakeup_enable((gpio_num_t)PIN_BTN1, GPIO_INTR_LOW_LEVEL);
@@ -270,13 +300,21 @@ void Task_Display_UI(void *pvParameters) {
                     esp_sleep_enable_uart_wakeup(1);
                 #endif
 
-                // 4. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
+                // 9. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
                 // (Procesor zastaví hodiny, minimální odběr proudu, RAM zůstává plně zachována)
                 esp_light_sleep_start();
 
                 // ===================================================
-                // 5. PROBUZENÍ! (Kód pokračuje okamžitě zde)
+                // 10. PROBUZENÍ! (Kód pokračuje okamžitě zde)
                 // ===================================================
+                #ifdef PIN_TFT_LED
+                    digitalWrite(PIN_TFT_LED, HIGH); // Znovu rozsvítíme podsvícení displeje
+                #endif
+
+                #ifdef ENABLE_LCD1602
+                    sensorManager.setLCDBacklight(true); // Znovu rozsvítíme LCD 1602
+                #endif
+
                 esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
                 Serial.printf("[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
                 if (duvod == ESP_SLEEP_WAKEUP_GPIO) {

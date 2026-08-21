@@ -53,6 +53,7 @@ public:
 
     // I2C LCD 1602 displej
     void writeLCD1602(const char* line1, const char* line2 = nullptr);
+    void setLCDBacklight(bool on);
 
     ///////////////////////
     // Ovládáni spodních periferii (OUTPUTS)

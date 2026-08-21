@@ -266,3 +266,15 @@ void SensorManager::writeLCD1602(const char* line1, const char* line2) {
     }
 #endif
 }
+
+void SensorManager::setLCDBacklight(bool on) {
+#ifdef ENABLE_LCD1602
+    if (on) {
+        lcd.backlight();
+        lcd.display();
+    } else {
+        lcd.noBacklight();
+        lcd.noDisplay();
+    }
+#endif
+}
