@@ -29,6 +29,7 @@
 //#define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
 //#define ENABLE_TCS34725       // Barevný senzor TCS34725 (I2C_1/Wire1, 0x29)
 #define ENABLE_UART_ESP       // UART komunikace s druhým ESP32
+#define ENABLE_WIFI_WEB       // Wi-Fi a WebServer (SoftAP + Captive Portal + WebSocket)
 
 // =============================================================================
 //  MAPA PINŮ

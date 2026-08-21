@@ -41,6 +41,7 @@ HardwareSerial SerialESP(1);
   Adafruit_NeoPixel strip(WS2812B_NUM_LEDS, PIN_WS2812B, NEO_GRB + NEO_KHZ800);
 #endif
 
+
 // Pomocná funkce pro 74HC595 (jen pro vymazání při startu)
 #ifdef ENABLE_74HC595
   static void seg_clear() {
@@ -89,72 +90,105 @@ bool setupSensors() {
     
     // --- 1. I2C Sběrnice ---
 #if defined(ENABLE_LSM6DS3) || defined(ENABLE_LCD1602) || defined(ENABLE_VL53L0X)
-    Wire.begin(I2C0_SDA, I2C0_SCL);
-#endif
-#ifdef ENABLE_TCS34725
-    Wire1.begin(I2C1_SDA, I2C1_SCL);
+    if (!Wire.begin(I2C0_SDA, I2C0_SCL)) {
+        drawErrorScreen("I2C_0 sbernice selhala!\n(SDA=" + String(I2C0_SDA) + ", SCL=" + String(I2C0_SCL) + ")");
+        return false;
+    }
+    Serial.println("[I2C_0] OK – Sbernice spustena.");
 #endif
 
-    // --- 2. Složité I2C Senzory (s možností selhání) ---
+#ifdef ENABLE_TCS34725
+    if (!Wire1.begin(I2C1_SDA, I2C1_SCL)) {
+        drawErrorScreen("I2C_1 sbernice selhala!\n(SDA=" + String(I2C1_SDA) + ", SCL=" + String(I2C1_SCL) + ")");
+        return false;
+    }
+    Serial.println("[I2C_1] OK – Sbernice spustena.");
+#endif
+
+    // --- 2. Složité I2C Senzory (s kontrolou odpovědi) ---
 #ifdef ENABLE_LSM6DS3
     bool lsmOk = false;
     uint8_t lsmAddr = 0x6B;
-    if (lsm6ds3.begin_I2C(0x6B)) {
+    if (lsm6ds3.begin_I2C(0x6B, &Wire)) {
         lsmOk = true;
         lsmAddr = 0x6B;
         Serial.println("[LSM6DS3]    OK – Wire 0x6B");
-    } else if (lsm6ds3.begin_I2C(0x6A)) {
+    } else if (lsm6ds3.begin_I2C(0x6A, &Wire)) {
         lsmOk = true;
         lsmAddr = 0x6A;
         Serial.println("[LSM6DS3]    OK – Wire 0x6A");
     } else {
-        Serial.println("[LSM6DS3]    VAROVANI: Senzor neodpovida!");
+        Serial.println("[LSM6DS3]    CHYBA: Senzor neodpovida na 0x6B ani 0x6A!");
+        drawErrorScreen("LSM6DS3 Gyro/Akcel\nneodpovida na I2C (0x6B/0x6A)!");
+        return false;
     }
 
     if (lsmOk) {
         lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
         lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
-        lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready, aby pin nekmital 100x za sekundu!
+        lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready
 
         // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU ---
-        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: Interrupt enable + high-pass filtr
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(0x00); Wire.endTransmission(); // WAKE_UP_DUR: 0
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x01); Wire.endTransmission(); // WAKE_UP_THS: 0x01 (MAXIMÁLNÍ citlivost – reaguje i na nejjemnější dotyk/klepnutí)
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission(); // MD1_CFG: Vyvést Wake-up na pin INT1
+        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission();
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(0x00); Wire.endTransmission();
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x01); Wire.endTransmission();
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission();
         
         #ifdef PIN_IMU_INT
             pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
         #endif
         
-        Serial.println("[LSM6DS3]    Stredni citlivost probuzeni na INT1 aktivni (THS 0x14).");
+        Serial.println("[LSM6DS3]    Probuzeni na INT1 aktivni.");
     }
 #endif
 
 #ifdef ENABLE_VL53L0X
     vl53.setTimeout(500);
     if (!vl53.init()) {
-        drawErrorScreen("VL53L0X Laser neodpovida!");
+        drawErrorScreen("VL53L0X Laser dalkomer\nneodpovida na I2C (0x29)!");
         return false;
     }
+    Serial.println("[VL53L0X]   OK – Laser dalkomer pripraven.");
 #endif
 
 #ifdef ENABLE_TCS34725
     if (!tcs.begin(TCS34725_ADDRESS, &Wire1)) {
-        drawErrorScreen("TCS34725 Barvy neodpovidaji!");
+        drawErrorScreen("TCS34725 Barevny senzor\nneodpovida na I2C_1!");
         return false;
     }
+    Serial.println("[TCS34725]  OK – Barevny senzor pripraven.");
 #endif
 
 #ifdef ENABLE_LCD1602
+    Wire.beginTransmission(0x27);
+    if (Wire.endTransmission() != 0) {
+        drawErrorScreen("LCD 1602 displej (0x27)\nneodpovida na I2C!");
+        return false;
+    }
     lcd.init();
     lcd.backlight();
     lcd.setCursor(0, 0);
-    lcd.print("Booting...");
+    lcd.print("ESP-Demo-Box OK");
+    Serial.println("[LCD1602]   OK – Displej 16x2 inicializovan.");
 #endif
 
-    // --- 3. Jednoduché senzory a výstupy (Nemusí se složitě inicializovat, jen pinMode) ---
+    // --- 3. Jednoduché senzory s testem odezvy ---
 #if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
-    dht.begin(); // Vrací void, chybu zjistíme až při čtení
+    dht.begin();
+    delay(100);
+    float testTemp = dht.readTemperature();
+    float testHum = dht.readHumidity();
+    if (isnan(testTemp) && isnan(testHum)) {
+        // Zkusíme ještě jedno rychlé přečtení po krátké prodlevě
+        delay(250);
+        testTemp = dht.readTemperature();
+        testHum = dht.readHumidity();
+        if (isnan(testTemp) && isnan(testHum)) {
+            drawErrorScreen("DHT Teplomer/Vlhkomer\nneodpovida na GPIO " + String(PIN_DHT) + "!");
+            return false;
+        }
+    }
+    Serial.println("[DHT]       OK – Teplota a vlhkost funkcni.");
 #endif
 
 #ifdef ENABLE_ULTRASONIC
@@ -205,16 +239,43 @@ bool setupSensors() {
     return true;
 }
 
-bool setupWiFi() {
-    Serial.println("[SETUP] Inicializace Wi-Fi...");
-    return true;
-}
 
 bool setupUART() {
-    Serial.println("[SETUP] Inicializace UART komunikace...");
+    Serial.println("[SETUP] Inicializace UART komunikace a Handshake...");
 #ifdef ENABLE_UART_ESP
     SerialESP.begin(UART_ESP_BAUD, SERIAL_8N1, UART_ESP_RX, UART_ESP_TX);
     Serial.println("[SETUP] SerialESP (UART1) spusten na 115200 baud.");
+
+    // --- SYNCHRONIZAČNÍ BOOT HANDSHAKE SE SPODNÍM PANELEM ---
+    Serial.println("[HANDSHAKE] Cekam na potvrzeni pripravenosti spodniho panelu...");
+    SerialESP.flush();
+    unsigned long startTime = millis();
+
+    while (millis() - startTime < 3500) { // Timeout 3.5 sekundy
+        if (SerialESP.available()) {
+            String msg = SerialESP.readStringUntil('\n');
+            msg.trim();
+
+            // 1. Spodní panel je v pořádku
+            if (msg == "BOOT:READY") {
+                SerialESP.println("BOOT:START"); // Povolíme spodnímu panelu start
+                Serial.println("[HANDSHAKE] Spodni panel OK! Spoustim system...");
+                return true;
+            }
+
+            // 2. Spodní panel hlásí chybu inicializace hardwaru
+            if (msg.startsWith("BOOT:ERR:")) {
+                String errorReason = msg.substring(9);
+                drawErrorScreen("CHYBA DOLNIHO PANELU:\n" + errorReason);
+                return false;
+            }
+        }
+        delay(10);
+    }
+
+    // 3. Spodní panel vůbec neodpověděl v časovém limitu
+    drawErrorScreen("DOLNI PANEL NEODPOVIDA!\nZkontroluj UART / napajeni.");
+    return false;
 #endif
     return true;
 }
@@ -233,8 +294,6 @@ bool initializeAllHardware() {
     // 2. SENZORY
     if (!setupSensors()) return false;
     
-    // 3. WI-FI
-    if (!setupWiFi()) return false;
     
     // 4. UART & HANDSHAKE
     if (!setupUART()) return false;
