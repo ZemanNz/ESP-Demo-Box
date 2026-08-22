@@ -3,38 +3,55 @@
 #include "esp_wifi.h"
 
 // ZDE DOPLŇ SVOJE ÚDAJE K DOMÁCÍ WI-FI SÍTI
-const char* ssid = "TVOJE_WIFI_JMENO";
-const char* password = "TVOJE_WIFI_HESLO";
+const char* ssid = "zemcom";
+const char* password = "radekzeman";
 
 unsigned long lastPrintTime = 0;
 
 // Toto je speciální ESP-IDF callback funkce. 
 // Spustí se na pozadí ÚPLNĚ POKAŽDÉ, když ESP32 chytí Wi-Fi paket.
 void csi_callback(void *ctx, wifi_csi_info_t *info) {
-    
-    // Zpomalovač: Vypíšeme data jen každých 500 milisekund, ať to stíháš číst
-    if (millis() - lastPrintTime < 500) {
-        return; 
-    }
+    if (millis() - lastPrintTime < 100) return; 
     lastPrintTime = millis();
 
-    // Vytažení základních informací o paketu
-    int rssi = info->rx_ctrl.rssi;
-    
-    Serial.printf("\n[ZÁCHYT] RSSI: %d dBm | MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", 
-                  rssi, 
-                  info->mac[0], info->mac[1], info->mac[2], 
-                  info->mac[3], info->mac[4], info->mac[5]);
-
-    // V info->buf jsou schovaná ta kouzelná surová data (CSI) - pole amplitud a fází.
-    // Vypíšeme si jen prvních 10 hodnot pro ukázku, jak to vlnění vypadá.
     int8_t *csi_data = (int8_t *)info->buf;
+    static int last_amplitudes[20]; 
+    int fluctuation = 0;
+    int index = 0;
     
-    Serial.print("CSI Amplitudy (vzorek): ");
-    for (int i = 0; i < 10; i++) {
-        Serial.printf("%4d ", csi_data[i]);
+    // 1. Výpočet fluktuace (Tady se nic nemění)
+    for (int i = 30; i < 50; i++) {
+        int current_amplitude = abs(csi_data[i]);
+        fluctuation += abs(current_amplitude - last_amplitudes[index]);
+        last_amplitudes[index] = current_amplitude;
+        index++;
     }
-    Serial.println("\n--------------------------------------------------");
+
+    // --- 2. INŽENÝRSKÝ FILTR (DEBOUNCE / HYSTEREZE) ---
+    
+    // Zvýšili jsme práh z 25 na 50 přesně podle tvých naměřených dat!
+    int threshold = 50; 
+    
+    // Statická proměnná si pamatuje "skóre" poplachů mezi jednotlivými pakety
+    static int poplach_skore = 0; 
+
+    // Přidáváme nebo ubíráme body
+    if (fluctuation > threshold) {
+        poplach_skore++; // Detekován šum, přidáme bod
+    } else {
+        if (poplach_skore > 0) poplach_skore--; // Je klid, uklidňujeme se a ubíráme bod
+    }
+
+    // Zastropování skóre, aby nešlo do nekonečna (0 až 5)
+    if (poplach_skore > 5) poplach_skore = 5;
+
+    // --- 3. FINÁLNÍ VYHODNOCENÍ ---
+    // Poplach se spustí AŽ KDYŽ skóre dosáhne hodnoty 3 (tzn. tři výkyvy po sobě)
+    if (poplach_skore >= 3) {
+        Serial.printf("[ZÁCHYT] Fluktuace: %3d | Skore: %d/5 | VÝSLEDEK: [ 🚨 POHYB ]\n", fluctuation, poplach_skore);
+    } else {
+        Serial.printf("[ZÁCHYT] Fluktuace: %3d | Skore: %d/5 | VÝSLEDEK: [ Klid ]\n", fluctuation, poplach_skore);
+    }
 }
 
 void setup() {
