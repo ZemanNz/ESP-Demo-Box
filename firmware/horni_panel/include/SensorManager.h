@@ -28,6 +28,7 @@ public:
     // Hromadné přečtení všech senzorů
     void updateAllSensors();
     void updateAll() { updateAllSensors(); } // Alias
+    void readAllSensors() { updateAllSensors(); } // Alias
 
     // =====================================================
     // 2. OVLÁDÁNÍ VÝSTUPŮ (OUTPUTS) -> HW AKCE + ZÁPIS STAVU DO SYSTEMSTATE
@@ -64,6 +65,11 @@ public:
     void setBottomContinuousServo(int8_t speed);
     void setBottomLedStrip(const uint32_t leds[8], uint8_t brightness);
     void setBottomOledText();
+
+private:
+    bool lastTopBtnState = false;
+    uint32_t topBtnPressStartTime = 0;
+    bool topBtnLongPressHandled = false;
 };
 
 extern SensorManager sensorManager;

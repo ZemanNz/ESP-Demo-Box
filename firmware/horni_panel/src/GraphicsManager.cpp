@@ -41,6 +41,10 @@ void GraphicsManager::fillRect(int x, int y, int w, int h, uint16_t color) {
     tft.fillRect(x, y, w, h, color);
 }
 
+void GraphicsManager::drawRect(int x, int y, int w, int h, uint16_t color) {
+    tft.drawRect(x, y, w, h, color);
+}
+
 void GraphicsManager::drawLine(int x0, int y0, int x1, int y1, uint16_t color) {
     tft.drawLine(x0, y0, x1, y1, color);
 }

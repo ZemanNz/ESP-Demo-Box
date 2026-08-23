@@ -119,6 +119,8 @@ private:
     AppMode currentMode;
     AppMode lastMode;
     int menuCursorIndex;
+    bool infoActive;
+    int32_t lastProcessedEncoderPos;
     SensorData sensors;
     bool uiNeedsUpdate;
     bool bottomNeedsTx;
@@ -129,6 +131,8 @@ public:
         currentMode = MODE_MAIN_MENU;
         lastMode = MODE_MAIN_MENU;
         menuCursorIndex = 0;
+        infoActive = false;
+        lastProcessedEncoderPos = 0;
         uiNeedsUpdate = true;
         bottomNeedsTx = true;
         memset(&sensors, 0, sizeof(SensorData));
@@ -155,6 +159,15 @@ public:
             xSemaphoreGive(stateMutex);
         }
         return mode;
+    }
+
+    bool isInfoActive() {
+        bool active = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            active = infoActive;
+            xSemaphoreGive(stateMutex);
+        }
+        return active;
     }
 
     int getMenuCursorIndex() {
@@ -204,8 +217,57 @@ public:
                 lastMode = currentMode; // Ukládáme jen platný pracovní mód
             }
             currentMode = newMode;
+            infoActive = false; // Při změně módu zavřeme případné info
             uiNeedsUpdate = true;
             bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void setInfoOverlay(bool active) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            infoActive = active;
+            uiNeedsUpdate = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void prepniInfoOverlay() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            infoActive = !infoActive;
+            uiNeedsUpdate = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void checkModeChange() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            int32_t encoderDiff = sensors.encoderPos - lastProcessedEncoderPos;
+            if (encoderDiff != 0) {
+                lastProcessedEncoderPos = sensors.encoderPos;
+                
+                // Přepínáme běžné módy pouze pokud nejsme v režimu spánku
+                if (currentMode != MODE_SLEEP) {
+                    const int FIRST_MODE = (int)MODE_MAIN_MENU;
+                    const int LAST_MODE  = (int)MODE_BAREVNY; // Poslední standardní mód před SLEEP
+                    const int NUM_MODES  = LAST_MODE - FIRST_MODE + 1;
+                    
+                    int nextMode = ((int)currentMode + encoderDiff) % NUM_MODES;
+                    if (nextMode < 0) {
+                        nextMode += NUM_MODES;
+                    }
+                    nextMode += FIRST_MODE;
+                    
+                    if (currentMode != MODE_SLEEP) {
+                        lastMode = currentMode;
+                    }
+                    currentMode = (AppMode)nextMode;
+                    infoActive = false;
+                    uiNeedsUpdate = true;
+                    bottomNeedsTx = true;
+                    Serial.printf("[ENCODER] Prepinam mod na: %d\n", nextMode);
+                }
+            }
             xSemaphoreGive(stateMutex);
         }
     }

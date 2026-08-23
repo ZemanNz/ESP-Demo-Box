@@ -23,6 +23,8 @@ public:
     void clearScreen(uint16_t color = 0x0000); // 0x0000 = BLACK
     void drawTextPartial(int x, int y, String text, uint16_t fgColor, uint16_t bgColor, uint8_t size = 1);
     void fillRect(int x, int y, int w, int h, uint16_t color);
+    void drawRect(int x, int y, int w, int h, uint16_t color);
+    uint16_t color565(uint8_t r, uint8_t g, uint8_t b) { return tft.color565(r, g, b); }
 
     // -------------------------------------------------------------
     // Pokročilé grafické tvary (Moderní UI)

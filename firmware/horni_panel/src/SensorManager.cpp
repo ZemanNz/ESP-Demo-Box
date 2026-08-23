@@ -112,11 +112,40 @@ void SensorManager::readPhotoresistors() {
 #endif
 }
 
-// Tlačítko na horním panelu
+// Tlačítko na horním panelu (detekce krátkého stisku pro info a 1s podržení pro spánek)
 void SensorManager::readTopButton() {
 #ifdef ENABLE_BUTTONS
-    bool pressed = (digitalRead(PIN_BTN1) == LOW); // PULLUP -> LOW = stisknuto
-    globalState.updateTopButton(pressed);
+    bool isPressed = (digitalRead(PIN_BTN1) == LOW); // PULLUP -> LOW = stisknuto
+    globalState.updateTopButton(isPressed);
+
+    uint32_t now = millis();
+
+    // A) Náběžná hrana stisku (uživatel právě zmáčkl tlačítko)
+    if (isPressed && !lastTopBtnState) {
+        topBtnPressStartTime = now;
+        topBtnLongPressHandled = false;
+    }
+
+    // B) Tlačítko je drženo stisknuté (kontrola 1s na přechod do SLEEP)
+    if (isPressed && !topBtnLongPressHandled) {
+        if (now - topBtnPressStartTime >= 1000) { // 1 sekunda podržení
+            topBtnLongPressHandled = true;
+            Serial.println("[BTN] 1s podrzeni horniho tlacitka -> SLEEP");
+            globalState.setInfoOverlay(false);
+            globalState.setMode(MODE_SLEEP);
+        }
+    }
+
+    // C) Sestupná hrana (uživatel tlačítko pustil)
+    if (!isPressed && lastTopBtnState) {
+        // Pokud to nebyl dlouhý stisk a trval aspoň 50 ms (debounce ochrana)
+        if (!topBtnLongPressHandled && (now - topBtnPressStartTime >= 50)) {
+            Serial.println("[BTN] Kratky stisk horniho tlacitka -> Toggle INFO OVERLAY");
+            globalState.prepniInfoOverlay();
+        }
+    }
+
+    lastTopBtnState = isPressed;
 #endif
 }
 

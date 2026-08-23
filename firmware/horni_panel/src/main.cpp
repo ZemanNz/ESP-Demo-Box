@@ -197,7 +197,7 @@ void Task_UART(void *pvParameters) {
 }
 
 // ---------------------------------------------------------
-// 3. Task: Senzory (Poběží na Core 1)
+// 3. Task: Senzory a vstupy (Poběží na Core 1)
 // ---------------------------------------------------------
 void Task_Sensors(void *pvParameters) {
     Serial.print("Task_Sensors bezi na uvazku (Core): ");
@@ -206,15 +206,113 @@ void Task_Sensors(void *pvParameters) {
     for (;;) {
         AppMode currentMode = globalState.getMode();
 
-        if (currentMode == MODE_SLEEP) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
+        // Kontrola otočení rotačního enkodéru pro změnu módu
+        sensorManager.readAllSensors();
+        globalState.checkModeChange();
+
+        switch (currentMode) {
+            case MODE_SLEEP: {
+                // Ve spánku nečteme senzory, čekáme na probuzení
+                vTaskDelay(pdMS_TO_TICKS(100));
+                break;
+            }
+            
+            case MODE_MAIN_MENU: {
+            
+
+                break;
+            }
+
+            case MODE_SENSORS: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_GAME_SNAKE: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_GAME_FLAPPY: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_2048: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_VZDALENOST: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_WIFI_SPOJENI: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_SERVA: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_MOTOR: {
+                sensorManager.readAllSensors();
+                break;
+            }
+
+            case MODE_BAREVNY: {
+                sensorManager.readAllSensors();
+                break;
+            }
         }
 
-        // Čtení všech aktivních senzorů v běžném provozu
-        sensorManager.updateAll();
-        vTaskDelay(pdMS_TO_TICKS(10)); // Perioda 10 ms
+        vTaskDelay(pdMS_TO_TICKS(10)); // Perioda čtení senzorů 10 ms
     }
+}
+
+// Pomocná funkce pro vykreslení kruhového / Pac-man gauge ukazatele (0.0f až 1.0f)
+void drawRadialGauge(int cx, int cy, int rIn, int rOut, float percent, uint16_t activeColor, uint16_t bgColor) {
+    if (percent < 0.0f) percent = 0.0f;
+    if (percent > 1.0f) percent = 1.0f;
+    float maxAngle = percent * 360.0f;
+    for (int deg = 0; deg < 360; deg += 6) {
+        float rad = (deg - 90) * 0.0174532925f; // Převod na radiány (-90 = nahoře)
+        float cosA = cos(rad);
+        float sinA = sin(rad);
+        uint16_t c = (deg <= maxAngle) ? activeColor : bgColor;
+        
+        int x1 = cx + (int)(rIn * cosA);
+        int y1 = cy + (int)(rIn * sinA);
+        int x2 = cx + (int)(rOut * cosA);
+        int y2 = cy + (int)(rOut * sinA);
+        gfx.drawLine(x1, y1, x2, y2, c);
+    }
+}
+
+// Pomocná funkce pro vykreslení plného Pac-man kruhového výseku (0.0f až 1.0f)
+void drawPacmanGauge(int cx, int cy, int radius, float percent, uint16_t activeColor, uint16_t bgColor) {
+    if (percent < 0.0f) percent = 0.0f;
+    if (percent > 1.0f) percent = 1.0f;
+
+    // 1. Podkladový kruh
+    gfx.fillCircle(cx, cy, radius, bgColor);
+
+    // 2. Zaplnění koláčového výseku (Pac-man tělo)
+    int maxAngle = (int)(percent * 360.0f);
+    if (maxAngle > 0) {
+        for (int deg = 0; deg <= maxAngle; deg += 3) {
+            float rad = (deg - 90) * 0.0174532925f; // Začátek nahoře na 12 hodinách (-90 deg)
+            int x = cx + (int)(radius * cos(rad));
+            int y = cy + (int)(radius * sin(rad));
+            gfx.drawLine(cx, cy, x, y, activeColor);
+        }
+    }
+
+    // 3. Černý obrys
+    gfx.drawCircle(cx, cy, radius, ST77XX_BLACK);
 }
 
 // ---------------------------------------------------------
@@ -234,6 +332,10 @@ void Task_Display_UI(void *pvParameters) {
         // 2. Potřebujeme kompletně překreslit obrazovku? 
         // (Vlajka je true jen těsně po přepnutí stavu nebo stisku tlačítka)
         bool needsFullRedraw = globalState.popUiNeedsUpdate();
+
+
+        //vykreslujeme info?
+        bool infoActive = globalState.isInfoActive();
 
         // 3. Vykreslujeme podle módu
         switch (currentMode) {
@@ -337,22 +439,194 @@ void Task_Display_UI(void *pvParameters) {
                 break;
             }
 
-            case MODE_MAIN_MENU:
-
+            // =======================================================
+            case MODE_MAIN_MENU: {
                 delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
-                if (needsFullRedraw) {
-                    // TADY TVOŘÍŠ DESIGN HLAVNÍHO MENU
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(50, 20, "HLAVNI MENU", ST77XX_WHITE, ST77XX_BLACK, 2);
-                    
-                    gfx.fillRoundRect(20, 60, 200, 40, 5, ST77XX_BLUE);
-                    gfx.drawTextPartial(40, 70, "1. Senzory", ST77XX_WHITE, ST77XX_BLUE, 2);
-                    
-                    gfx.fillRoundRect(20, 110, 200, 40, 5, ST77XX_DARKGREY);
-                    gfx.drawTextPartial(40, 120, "2. Hra Had", ST77XX_WHITE, ST77XX_DARKGREY, 2);
+                bool isInfo = globalState.isInfoActive();
+
+                if (isInfo) {
+                    if (needsFullRedraw) {
+                        // INFO OVERLAY pro Hlavní menu
+                        gfx.clearScreen(ST77XX_BLACK);
+                        gfx.drawRoundRect(10, 10, 300, 220, 8, ST77XX_YELLOW);
+                        gfx.drawTextPartial(30, 25, "INFO: HLAVNI MENU", ST77XX_YELLOW, ST77XX_BLACK, 2);
+                        
+                        gfx.drawTextPartial(25, 60, "- Enkoder: Rotace meni mody", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(25, 80, "- Joy stisk: Rychly vyber modu", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(25, 100, "- Potenciometr: Uhel serva", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(25, 120, "- Joystick Y: Kontinualni servo", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(25, 140, "- Dolni tlacitka: Volba pro 7-seg", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(25, 160, "- Horni tlacitko (1s): Rezim spanku", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        
+                        gfx.drawTextPartial(40, 195, "[Stiskni horni tlacitko pro zpet]", ST77XX_GREEN, ST77XX_BLACK, 1);
+                    }
                 }
-                // Dál se nic neděje, procesor může odpočívat
+                else {
+                    SensorData data = globalState.getSensorData();
+
+                    // -------------------------------------------------------------
+                    // 1. STATICKÁ MASKA (Vykreslí se pouze jednou při vstupu)
+                    // -------------------------------------------------------------
+                    if (needsFullRedraw) {
+                        gfx.clearScreen(ST77XX_WHITE); // Základní bílé pozadí
+
+                        // A) HORNÍ ČÁST (Y = 0 až 140)
+                        // fot_l (Levý fotorezistor)
+                        gfx.drawRect(0, 0, 35, 140, ST77XX_BLACK);
+
+                        // Široký středový kolotoč módů (Mode Carousel)
+                        gfx.fillRect(36, 0, 178, 140, 0xDEFB); // Světle šedé pozadí
+                        gfx.drawRect(36, 0, 178, 140, ST77XX_BLACK);
+                        
+                        // 2 nad: Nejmenší, nejsvětlejší
+                        gfx.drawTextPartial(60, 14, "MODE_WIFI_DETECTION", 0x7BEF, 0xDEFB, 1);
+                        // 1 nad: Střední
+                        gfx.drawTextPartial(75, 36, "MODE_BAREVNY", 0x4208, 0xDEFB, 1);
+                        
+                        // AKTIVNÍ MÓD UPŘOSTŘED (Největší text velikosti 2 s bílou kartou)
+                        gfx.fillRoundRect(40, 54, 170, 34, 4, ST77XX_WHITE);
+                        gfx.drawRoundRect(40, 54, 170, 34, 4, ST77XX_BLACK);
+                        gfx.drawTextPartial(44, 63, "MODE_MAIN_MENU", ST77XX_BLACK, ST77XX_WHITE, 2);
+                        
+                        // 1 pod: Střední
+                        gfx.drawTextPartial(75, 96, "MODE_SENSORS", 0x4208, 0xDEFB, 1);
+                        // 2 pod: Nejmenší, nejsvětlejší
+                        gfx.drawTextPartial(70, 118, "MODE_GAME_SNAKE", 0x7BEF, 0xDEFB, 1);
+
+                        // Wi-Fi sekce (Plná výška Y = 0 až 140)
+                        gfx.fillRect(214, 0, 70, 140, ST77XX_WHITE);
+                        gfx.drawRect(214, 0, 70, 140, ST77XX_BLACK);
+                        
+                        // Zelená Wi-Fi ikona
+                        gfx.fillCircle(249, 44, 3, ST77XX_GREEN);
+                        gfx.drawCircle(249, 44, 10, ST77XX_GREEN);
+                        gfx.drawCircle(249, 44, 11, ST77XX_GREEN);
+                        gfx.drawCircle(249, 44, 18, ST77XX_GREEN);
+                        gfx.drawCircle(249, 44, 19, ST77XX_GREEN);
+                        gfx.fillRect(225, 45, 48, 18, ST77XX_WHITE); // Odříznutí spodku vln
+                        gfx.drawTextPartial(220, 96, "zarizeni :", ST77XX_BLACK, ST77XX_WHITE, 1);
+
+                        // fot_r (Pravý fotorezistor)
+                        gfx.drawRect(284, 0, 36, 140, ST77XX_BLACK);
+
+                        // B) SPODNÍ ČÁST (Y = 141 až 239)
+                        // Horizontální dělící linka
+                        gfx.drawLine(0, 140, 319, 140, ST77XX_BLACK);
+
+                        // Potenciometr box
+                        gfx.fillRect(48, 141, 58, 98, ST77XX_WHITE);
+                        gfx.drawRect(48, 141, 58, 98, ST77XX_BLACK);
+                        gfx.drawTextPartial(66, 145, "pot", ST77XX_BLACK, ST77XX_WHITE, 1);
+
+                        // Tlačítka 5x (D-Pad box)
+                        gfx.fillRect(106, 141, 70, 98, ST77XX_WHITE);
+                        gfx.drawRect(106, 141, 70, 98, ST77XX_BLACK);
+
+                        // joy-x box
+                        gfx.fillRect(176, 141, 48, 98, ST77XX_WHITE);
+                        gfx.drawRect(176, 141, 48, 98, ST77XX_BLACK);
+                        gfx.drawTextPartial(182, 145, "joy-x", ST77XX_BLACK, ST77XX_WHITE, 1);
+
+                        // joy-y box
+                        gfx.fillRect(224, 141, 48, 98, ST77XX_WHITE);
+                        gfx.drawRect(224, 141, 48, 98, ST77XX_BLACK);
+                        gfx.drawTextPartial(230, 145, "joy-y", ST77XX_BLACK, ST77XX_WHITE, 1);
+
+                        // Barevný senzor box
+                        gfx.fillRect(272, 141, 48, 98, 0x9E3F);
+                        gfx.drawRect(272, 141, 48, 98, ST77XX_BLACK);
+                        gfx.drawTextPartial(274, 145, "barevny", ST77XX_BLACK, 0x9E3F, 1);
+                    }
+
+                    // -------------------------------------------------------------
+                    // 2. ŽIVÁ ČÍSLA A GRAFICKÉ PAC-MAN UKAZATELE
+                    // -------------------------------------------------------------
+
+                    // A) Wi-Fi počet připojených zařízení
+                    #ifdef ENABLE_WIFI_WEB
+                        gfx.drawTextPartial(242, 114, String(WiFi.softAPgetStationNum()) + " ", ST77XX_GREEN, ST77XX_WHITE, 2);
+                    #else
+                        gfx.drawTextPartial(242, 114, "0 ", ST77XX_BLACK, ST77XX_WHITE, 2);
+                    #endif
+
+                    // B) Switche s1 a s2
+                    uint16_t s1Color = data.switch1 ? 0x07E0 : 0xF9C7;
+                    gfx.fillRect(1, 142, 22, 96, s1Color);
+                    gfx.drawRect(0, 141, 24, 98, ST77XX_BLACK);
+                    gfx.drawTextPartial(6, 185, "s1", ST77XX_BLACK, s1Color, 1);
+
+                    uint16_t s2Color = data.switch2 ? 0x07E0 : 0xF9C7;
+                    gfx.fillRect(25, 142, 22, 96, s2Color);
+                    gfx.drawRect(24, 141, 24, 98, ST77XX_BLACK);
+                    gfx.drawTextPartial(30, 185, "s2", ST77XX_BLACK, s2Color, 1);
+
+                    // C) Potenciometr plný Pac-man kruh (Žlutý)
+                    float potPercent = constrain((float)data.potentiometer / 4095.0f, 0.0f, 1.0f);
+                    drawPacmanGauge(77, 178, 17, potPercent, ST77XX_YELLOW, 0xDEFB);
+                    gfx.drawTextPartial(56, 214, String(data.potentiometer) + "   ", 0x4208, ST77XX_WHITE, 1);
+
+                    // D) 5x Tlačítka (D-Pad visualizer)
+                    // Horní tlačítko (btnDown[1] - zelené)
+                    gfx.fillCircle(141, 158, 7, data.btnDown[1] ? ST77XX_GREEN : ST77XX_WHITE);
+                    gfx.drawCircle(141, 158, 7, ST77XX_BLACK);
+
+                    // Prostřední tlačítko (btnDown[0] - červené)
+                    gfx.fillCircle(141, 186, 8, data.btnDown[0] ? ST77XX_RED : ST77XX_WHITE);
+                    gfx.drawCircle(141, 186, 8, ST77XX_BLACK);
+
+                    // Levé tlačítko (btnDown[2] - modré)
+                    gfx.fillCircle(117, 186, 7, data.btnDown[2] ? ST77XX_BLUE : ST77XX_WHITE);
+                    gfx.drawCircle(117, 186, 7, ST77XX_BLACK);
+
+                    // Pravé tlačítko (btnDown[3] - žluté)
+                    gfx.fillCircle(165, 186, 7, data.btnDown[3] ? ST77XX_YELLOW : ST77XX_WHITE);
+                    gfx.drawCircle(165, 186, 7, ST77XX_BLACK);
+
+                    // Dolní tlačítko (btnDown[4] - azurové)
+                    gfx.fillCircle(141, 214, 7, data.btnDown[4] ? ST77XX_CYAN : ST77XX_WHITE);
+                    gfx.drawCircle(141, 214, 7, ST77XX_BLACK);
+
+                    // E) Joystick X plný Pac-man kruh (Azurový / Modrý)
+                    float joyXPercent = constrain((float)data.joyX / 4095.0f, 0.0f, 1.0f);
+                    drawPacmanGauge(200, 178, 15, joyXPercent, ST77XX_CYAN, 0xDEFB);
+                    gfx.drawTextPartial(180, 214, String(data.joyX) + "   ", 0x4208, ST77XX_WHITE, 1);
+
+                    // F) Joystick Y plný Pac-man kruh (Oranžový)
+                    float joyYPercent = constrain((float)data.joyY / 4095.0f, 0.0f, 1.0f);
+                    drawPacmanGauge(248, 178, 15, joyYPercent, 0xFD20, 0xDEFB); // 0xFD20 = Oranžová
+                    gfx.drawTextPartial(228, 214, String(data.joyY) + "   ", 0x4208, ST77XX_WHITE, 1);
+
+                    // G) Barevný senzor náhled
+                    uint16_t liveColor = 0x9E3F;
+                    if (data.colorR > 0 || data.colorG > 0 || data.colorB > 0) {
+                        uint8_t r8 = data.colorR > 255 ? (data.colorR >> 8) : data.colorR;
+                        uint8_t g8 = data.colorG > 255 ? (data.colorG >> 8) : data.colorG;
+                        uint8_t b8 = data.colorB > 255 ? (data.colorB >> 8) : data.colorB;
+                        liveColor = gfx.color565(r8, g8, b8);
+                    }
+                    gfx.fillRect(273, 142, 46, 96, liveColor);
+                    gfx.drawRect(272, 141, 48, 98, ST77XX_BLACK);
+                    gfx.drawTextPartial(274, 145, "barevny", ST77XX_BLACK, liveColor, 1);
+
+                    // H) Fotorezistory fot_l a fot_r (Dynamický odstín šedá -> bílá)
+                    // Levý fotorezistor fot_l
+                    uint8_t grayL = map(constrain((int)data.photo1, 0, 4095), 0, 4095, 40, 255);
+                    uint16_t colL = gfx.color565(grayL, grayL, grayL);
+                    uint16_t textColL = (grayL > 130) ? ST77XX_BLACK : ST77XX_WHITE;
+                    gfx.fillRect(1, 1, 33, 138, colL);
+                    gfx.drawRect(0, 0, 35, 140, ST77XX_BLACK);
+                    gfx.drawTextPartial(5, 65, "fot_l", textColL, colL, 1);
+
+                    // Pravý fotorezistor fot_r
+                    uint8_t grayR = map(constrain((int)data.photo2, 0, 4095), 0, 4095, 40, 255);
+                    uint16_t colR = gfx.color565(grayR, grayR, grayR);
+                    uint16_t textColR = (grayR > 130) ? ST77XX_BLACK : ST77XX_WHITE;
+                    gfx.fillRect(285, 1, 33, 138, colR);
+                    gfx.drawRect(284, 0, 36, 140, ST77XX_BLACK);
+                    gfx.drawTextPartial(288, 65, "fot_r", textColR, colR, 1);
+                }
                 break;
+            }
 
             // =======================================================
             case MODE_SENSORS: {
@@ -376,7 +650,7 @@ void Task_Display_UI(void *pvParameters) {
             }
 
             // =======================================================
-            case MODE_2048:
+            case MODE_2048: {
                 delay = 50;
                 if (needsFullRedraw) {
                     g2048.reset();
@@ -389,46 +663,57 @@ void Task_Display_UI(void *pvParameters) {
                     g2048.pohyb = false; // Sníme flag, abychom nekreslili pořád
                 }
                 break;
+            }
 
-            case MODE_VZDALENOST:
+            // =======================================================
+            case MODE_VZDALENOST: {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(70, 100, "VZDALENOST", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
+            }
 
-            case MODE_WIFI_SPOJENI:
+            // =======================================================
+            case MODE_WIFI_SPOJENI: {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(52, 100, "WIFI SPOJENI", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
+            }
 
-            case MODE_SERVA:
+            // =======================================================
+            case MODE_SERVA: {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(115, 100, "SERVA", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
+            }
 
-            case MODE_MOTOR:
+            // =======================================================
+            case MODE_MOTOR: {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(115, 100, "MOTOR", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
+            }
 
-            case MODE_BAREVNY:
+            // =======================================================
+            case MODE_BAREVNY: {
                 delay = 50;
                 if (needsFullRedraw) {
                     gfx.clearScreen(ST77XX_BLACK);
                     gfx.drawTextPartial(34, 100, "BAREVNY SENZOR", ST77XX_WHITE, ST77XX_BLACK, 3);
                 }
                 break;
+            }
             
             // =======================================================
             case MODE_GAME_SNAKE: {
@@ -499,7 +784,7 @@ void setup() {
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
     xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 8192, NULL, 1, NULL, 0); // Core 0
-    xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0
+    //xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0
     
     xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 8192, NULL, 1, NULL, 1); // Core 1
     xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 4096, NULL, 1, NULL, 1); // Core 1
