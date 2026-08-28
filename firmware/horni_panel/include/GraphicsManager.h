@@ -50,6 +50,20 @@ public:
     void drawImage(int x, int y, const uint16_t* data, int w, int h);
 
     // -------------------------------------------------------------
+    // Kruhové / Pac-man a Wi-Fi ukazatele
+    // -------------------------------------------------------------
+    void drawRadialGauge(int cx, int cy, int rIn, int rOut, float percent, uint16_t activeColor, uint16_t bgColor = 0xDEFB);
+    void drawPacmanGauge(int cx, int cy, int radius, float percent, uint16_t activeColor, uint16_t bgColor = 0xDEFB);
+    void drawWifiIcon(int cx, int cy, uint16_t color, uint16_t bgColor = 0xFFFF);
+    
+    // -------------------------------------------------------------
+    // Vykreslování šipek, tlustých čar a barevného kruhu
+    // -------------------------------------------------------------
+    void drawThickLine(int x0, int y0, int x1, int y1, int thickness, uint16_t color);
+    void drawArrow(int x0, int y0, int x1, int y1, int headSize, uint16_t color);
+    void drawColorWheel(int cx, int cy, int radius);
+
+    // -------------------------------------------------------------
     // METODA 2: Kompletní Double-Buffering přes PSRAM
     // - Ideální pro hry a plynulé animace celého displeje
     // -------------------------------------------------------------

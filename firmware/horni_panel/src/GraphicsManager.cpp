@@ -78,6 +78,139 @@ void GraphicsManager::drawImage(int x, int y, const uint16_t* data, int w, int h
     tft.drawRGBBitmap(x, y, data, w, h);
 }
 
+void GraphicsManager::drawRadialGauge(int cx, int cy, int rIn, int rOut, float percent, uint16_t activeColor, uint16_t bgColor) {
+    if (percent < 0.0f) percent = 0.0f;
+    if (percent > 1.0f) percent = 1.0f;
+    float maxAngle = percent * 360.0f;
+    for (int deg = 0; deg < 360; deg += 6) {
+        float rad = (deg - 90) * 0.0174532925f; // Převod na radiány (-90 = nahoře)
+        float cosA = cos(rad);
+        float sinA = sin(rad);
+        uint16_t c = (deg <= maxAngle) ? activeColor : bgColor;
+        
+        int x1 = cx + (int)(rIn * cosA);
+        int y1 = cy + (int)(rIn * sinA);
+        int x2 = cx + (int)(rOut * cosA);
+        int y2 = cy + (int)(rOut * sinA);
+        tft.drawLine(x1, y1, x2, y2, c);
+    }
+}
+
+void GraphicsManager::drawPacmanGauge(int cx, int cy, int radius, float percent, uint16_t activeColor, uint16_t bgColor) {
+    if (percent < 0.0f) percent = 0.0f;
+    if (percent > 1.0f) percent = 1.0f;
+
+    // 1. Podkladový kruh
+    tft.fillCircle(cx, cy, radius, bgColor);
+
+    // 2. Zaplnění koláčového výseku (Pac-man tělo)
+    int maxAngle = (int)(percent * 360.0f);
+    if (maxAngle > 0) {
+        for (int deg = 0; deg <= maxAngle; deg += 3) {
+            float rad = (deg - 90) * 0.0174532925f; // Začátek nahoře na 12 hodinách (-90 deg)
+            int x = cx + (int)(radius * cos(rad));
+            int y = cy + (int)(radius * sin(rad));
+            tft.drawLine(cx, cy, x, y, activeColor);
+        }
+    }
+
+    // 3. Černý obrys
+    tft.drawCircle(cx, cy, radius, ST77XX_BLACK);
+}
+
+void GraphicsManager::drawWifiIcon(int cx, int cy, uint16_t color, uint16_t bgColor) {
+    tft.fillCircle(cx, cy, 3, color);
+    tft.drawCircle(cx, cy, 10, color);
+    tft.drawCircle(cx, cy, 11, color);
+    tft.drawCircle(cx, cy, 18, color);
+    tft.drawCircle(cx, cy, 19, color);
+    tft.fillRect(cx - 24, cy + 1, 48, 18, bgColor); // Odříznutí spodku vln
+}
+
+void GraphicsManager::drawThickLine(int x0, int y0, int x1, int y1, int thickness, uint16_t color) {
+    if (thickness <= 1) {
+        tft.drawLine(x0, y0, x1, y1, color);
+        return;
+    }
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len = sqrt(dx * dx + dy * dy);
+    if (len < 0.001f) return;
+    float nx = -dy / len * (thickness / 2.0f);
+    float ny = dx / len * (thickness / 2.0f);
+    
+    int p1x = x0 + (int)nx, p1y = y0 + (int)ny;
+    int p2x = x0 - (int)nx, p2y = y0 - (int)ny;
+    int p3x = x1 - (int)nx, p3y = y1 - (int)ny;
+    int p4x = x1 + (int)nx, p4y = y1 + (int)ny;
+    
+    tft.fillTriangle(p1x, p1y, p2x, p2y, p3x, p3y, color);
+    tft.fillTriangle(p1x, p1y, p3x, p3y, p4x, p4y, color);
+}
+
+void GraphicsManager::drawArrow(int x0, int y0, int x1, int y1, int headSize, uint16_t color) {
+    drawThickLine(x0, y0, x1, y1, 6, color);
+    
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len = sqrt(dx * dx + dy * dy);
+    if (len < 0.001f) return;
+    
+    float ux = dx / len;
+    float uy = dy / len;
+    
+    float nx = -uy;
+    float ny = ux;
+    
+    float bx = x1 - ux * headSize;
+    float by = y1 - uy * headSize;
+    
+    int a1x = x1, a1y = y1;
+    int a2x = (int)(bx + nx * (headSize * 0.8f)), a2y = (int)(by + ny * (headSize * 0.8f));
+    int a3x = (int)(bx - nx * (headSize * 0.8f)), a3y = (int)(by - ny * (headSize * 0.8f));
+    
+    tft.fillTriangle(a1x, a1y, a2x, a2y, a3x, a3y, color);
+}
+
+void GraphicsManager::drawColorWheel(int cx, int cy, int radius) {
+    // 1. Plný bílý podklad, aby barva pozadí nikde neprosvítala
+    tft.fillCircle(cx, cy, radius, ST77XX_WHITE);
+
+    // 2. Vykreslíme plné barevné trojúhelníkové výseče (100% krytí)
+    float prevRad = 0.0f;
+    int prevX = cx + radius;
+    int prevY = cy;
+
+    for (int deg = 2; deg <= 360; deg += 2) {
+        float rad = deg * 0.0174532925f;
+        float h = deg / 60.0f;
+        int i = (int)h;
+        float f = h - i;
+        uint8_t q = (uint8_t)(255 * (1.0f - f));
+        uint8_t t = (uint8_t)(255 * f);
+        uint8_t r = 0, g = 0, b = 0;
+        switch (i % 6) {
+            case 0: r = 255; g = t;   b = 0;   break;
+            case 1: r = q;   g = 255; b = 0;   break;
+            case 2: r = 0;   g = 255; b = t;   break;
+            case 3: r = 0;   g = q;   b = 255; break;
+            case 4: r = t;   g = 0;   b = 255; break;
+            case 5: r = 255; g = 0;   b = q;   break;
+        }
+        uint16_t col = tft.color565(r, g, b);
+        int curX = cx + (int)(radius * cos(rad));
+        int curY = cy + (int)(radius * sin(rad));
+
+        tft.fillTriangle(cx, cy, prevX, prevY, curX, curY, col);
+
+        prevX = curX;
+        prevY = curY;
+    }
+
+    // 3. Čistý černý obrys
+    tft.drawCircle(cx, cy, radius, ST77XX_BLACK);
+}
+
 GFXcanvas16* GraphicsManager::getCanvas() {
     if (canvas == nullptr) {
         Serial.println("[GFX] Alokuji 150KB Canvas do PSRAM pro Double Buffering...");
