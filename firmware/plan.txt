@@ -1,0 +1,106 @@
+- HORNÍ TLAČÍTKO:
+  - Krátký stisk: Info overlay na horním TFT displeji (zobrazí nápovědu / co co dělá v daném módu)
+  - Dlouhý stisk: Vstup do MODE_SLEEP (uspání obou panelů) a probuzení
+- JOYSTICK TLAČÍTKO (Joy btn):
+  - Stisk: Otevře rychlý výběr / přepínač módů (MODE_SWITCH), v nabídce se pak naviguje joystickem (nebo spodními tlačítky)
+
+
+
+MODE_MAIN_MENU
+- barevnej -> led horni pasek
+- dolni pasek odkres k dolnimu hybani
+- podle tlacitek prepinani meridel k sedmisegmentovce... + indikacni led
+- na 1602 teplota + vlhkost + fotorezisty
+- gyroskop na h display
+- h display... gyro, barevnej, prekazka, hodnoty ze spodniho
+- potenciometrem se posouva normalni servo
+- switche pro motor a ch servo --> taky na h display nebo na maly, nebo na aly neco s tim potakem procenta
+- joystick pro rizeni kontinualneho serva
+- na display mit wifi pripojeno / ne
+- muzu delat nejak kombinace... kratke/ dlouhe stisknuti....
+
+
+
+
+MODE_GYRO
+- kresleni grafu na display... prepinani pomoci tlacitek..... teplo, svit, gyro by mohlo byt takove ty 3 sipky v prostoru..., vzdalenost
+- dolek muze asi byt vypli
+
+
+MODE_GAME_SNAKE
+- na h displaji se bude hrat snake
+- ovladat se bude pres tlacitka na spodnim display a nebo joystick.... 
+- na jinem display by se moh zobrazovat cas a skore...
+- led pasek by mohl byt v bave hada + 1 policko jabko cervene
+- druhy led pasek bude nejak delat pozadi ... preryvat se barvy, 
+- muze se vykreslovat treba teplota...
+
+
+MODE_GAME_FLAPPY
+- na h displaji se bude hrat bird
+- ovladat se bude pres spodn on tlacitko
+- zase cas a skore
+- zas motiv birda
+- a zase podgres
+- zase treba teplota
+
+
+MODE_2048
+- na h displaji se bude hrat 2048
+- ovladat se bude pres spodni tlacitka, nebo joystickem
+- zase cas a skore
+- zas motiv 2048
+- a zase podgres
+- zase treba teplota
+- mohlo by treba byt to nejskore...
+
+
+
+MODE_VZDALENOST
+- mohly by se vykreslovat 3 vedle sebe na display a barevne urcit viteze..nebo neco tak...
+- 
+
+
+MODE_WIFI_SPOJENI
+- mobl by to nejak ukazovat jak je to spojene s telefonem a pak treba nejaka komunikace ci neco...
+- kdyby telefon nebyl pripojen tak treba nejaka hezka ikonka no connection
+- treba nejak pocitat vzdalenost nebo jine cool sracky
+- kolik je pripojeno zarizeni...
+
+MODE_SERVA
+na h displaji by se nejak zobrazoval vykon ci pwm... a neco tak nejaka vizualizace atd.
+
+
+MODE_DOKUMENTACE
+- mohli by bejt nejak fotky ze staveni, treba nejak vlozen text maturitni prace nejake info atd.... 
+
+MODE_WIFI_DETECTION
+- uz to docea funguje..... ale je potreba dotahnout....
+
+    Princip: Využívá inovativní technologii Wi-Fi CSI (Channel State Information), která analyzuje mikroskopické deformace rádiových vln a tvoří neviditelný radar pro detekci pohybu osob (i přes sádrokartonovou zeď či dveře).
+
+    Hardware: Nevyžaduje naprosto žádný další fyzický senzor. Vystačí si pouze s horním mikrokontrolérem ESP32-S3 a běžně připojeným telefonem uživatele, jehož odesílané síťové pakety (např. posouvání menu) slouží jako odrazové "radarové pulzy".
+
+    Vizuál (Horní TFT displej): Na velkém displeji se v reálném čase vykresluje živý graf (podobný EKG), který se při klidu v místnosti drží na nule a při protnutí Wi-Fi vln člověkem prudce vystřelí do výšky.
+
+    Akce (Spodní panel): Jakmile výkyv v grafu překročí nastavený limit, uživatelské prostředí zčervená, rozsvítí se varovné LEDky, spustí se bzučák a na malém spodním OLED displeji vyskočí hlášení o detekci.
+
+    Zdroje a knihovny (ESP-CSI):
+
+    Oficiální repozitář výrobce (Espressif): https://github.com/espressif/esp-csi
+
+    Příklad přímo na detekci pohybu člověka (Human Presence Detection): Můžeš se inspirovat rovnou hotovým kódem pro analýzu přijatých dat zde: https://github.com/espressif/esp-csi/tree/master/examples/get-started/csi_recv
+
+
+MODE_BAREVNY
+- vybarvovat nejak barevne display,podle barevnyho
+
+MODE_SWITCH
+- rychlý výběr / přepínač módů a nastavení
+- vstup: stisknutí tlačítka na joysticku (joy btn)
+- navigace v nabídce: joystickem (nebo spodními tlačítky)
+
+
+MODE_SLEEP
+- vstup: dlouhé stisknutí horního tlačítka
+- vypne / uspí se horní i dolní panel, dalším stiskem se probudí
