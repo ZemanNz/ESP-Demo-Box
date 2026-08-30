@@ -9,8 +9,8 @@ let currentAppMode = 0;     // Číslo aktuálního aktivního režimu na ESP32
 
 // Názvy jednotlivých módů pro hezké vypsání v záložce Systém
 const modeNames = [
-    "Hlavní menu", "Senzory", "Hra Snake", "Hra Flappy", "Hra 2048",
-    "Měření vzdálenosti", "Wi-Fi spojení", "Ovládání serv", "Ovládání motoru",
+    "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048",
+    "Měření vzdálenosti", "Wi-Fi QR spojení", "Wi-Fi CSI Radar", "Ovládání serv", "Ovládání motoru",
     "Barevný senzor", "Spánkový režim"
 ];
 
@@ -117,6 +117,17 @@ function handleTelemetry(d) {
     if (d.laser !== undefined) setText('val-laser', d.laser);
     if (d.ultra !== undefined) setText('val-ultra', d.ultra >= 0 ? d.ultra.toFixed(1) : '--');
     if (d.ir !== undefined) setText('val-ir', d.ir >= 0 ? d.ir.toFixed(1) : '--');
+    
+    // Wi-Fi Telemetrie & CSI Radar
+    if (d.wifi_dist !== undefined) setText('val-wifi-dist', d.wifi_dist > 0.1 ? d.wifi_dist.toFixed(1) + ' m' : '---');
+    if (d.csi_metric !== undefined) setText('val-csi-metric', d.csi_metric.toFixed(2));
+    if (d.csi_motion !== undefined) {
+        const motEl = document.getElementById('val-csi-motion');
+        if (motEl) {
+            motEl.innerText = d.csi_motion ? '🚨 POHYB DETEKOVÁN!' : 'KLID';
+            motEl.className = d.csi_motion ? 'tag active' : 'tag';
+        }
+    }
     
     // IR detekce překážky (změna barvy visačky)
     if (d.irobs !== undefined) {
@@ -311,4 +322,14 @@ function setRgbPreset(hex) {
 // Zazvonění bzučákem
 function beep(freq, durationMs) {
     sendCmd('beep', { freq: parseInt(freq), duration: parseInt(durationMs) });
+}
+
+// Spuštění 5sekundové kalibrace Wi-Fi CSI radaru
+function calibrateCsi() {
+    sendCmd('calibrateCsi');
+}
+
+// Virtuální stisk tlačítka D-Padu (5 tlačítek do kříže)
+function sendBtn(index, isPressed) {
+    sendCmd('pressBtn', { idx: parseInt(index), pressed: isPressed });
 }

@@ -1,5 +1,6 @@
 #include "WebManager.h"    // Naše hlavička s deklarací třídy WebManager
 #include "WebPages.h"      // Soubor, kde máme zkompilované texty webu (HTML, CSS a JS)
+#include "WiFiCsiManager.h"// Wi-Fi CSI Radar a měření vzdálenosti
 #include <ArduinoJson.h>   // Knihovna pro snadnou práci s formátem JSON (čtení i tvorba zpráv)
 
 // --- Konstruktor: Vytvoření objektu WebManager ---
@@ -52,6 +53,9 @@ bool WebManager::begin(SystemState* state) {
     // Spustíme webový server
     server.begin();
     Serial.println("[WebManager] HTTP Server a WebSocket bezi na portu 80.");
+
+    // Inicializace Wi-Fi CSI subsystému
+    wifiCsiManager.begin();
 
     return true;
 }
@@ -199,10 +203,20 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
         for (int i = 0; i < 8; i++) leds[i] = col; // Nastavíme stejnou barvu pro všech 8 LED na pásku
         pState->updateLedStripTop(leds, bright);   // Zapíšeme do globálního stavu
     }
-    // 7. Příkaz pro pípnutí bzučáku s danou frekvencí
+    // 7. Příkaz pro spuštění kalibrace Wi-Fi CSI radaru
+    else if (strcmp(cmd, "calibrateCsi") == 0) {
+        wifiCsiManager.startCalibration(5000);
+    }
+    // 8. Příkaz pro pípnutí bzučáku s danou frekvencí
     else if (strcmp(cmd, "beep") == 0) {
         uint16_t freq = doc["freq"] | 1000;     // Frekvence v Hz (např. 1000 Hz)
         pState->updateBuzzer(true, freq);       // Zapneme bzučák
+    }
+    // 9. Příkaz pro virtuální stisk tlačítek dolního panelu (D-Pad dálkový ovladač)
+    else if (strcmp(cmd, "pressBtn") == 0) {
+        int idx = doc["idx"] | 0;
+        bool pressed = doc["pressed"] | false;
+        pState->updateDownButton((uint8_t)idx, pressed);
     }
 }
 
@@ -270,6 +284,9 @@ void WebManager::broadcastTelemetry() {
     doc["uptime"] = millis();                  // Jak dlouho ESP32 běží od zapnutí (v milisekundách)
     doc["heap"] = ESP.getFreeHeap();           // Velikost volné operační paměti RAM v bajtech
     doc["clients"] = (int)ws.count();          // Počet právě připojených telefonů
+    doc["csi_motion"] = d.wifiMotionDetected;  // Stav CSI radaru (pohyb / klid)
+    doc["csi_metric"] = d.wifiMotionMetric;    // CSI úroveň signálu
+    doc["wifi_dist"] = d.wifiDistanceM;        // Odhad vzdálenosti v metrech
 
     // Převedeme JSON do textového řetězce ve statickém poli buffer[768] (bezpečně bez dynamické alokace)
     char buffer[768];
@@ -289,7 +306,40 @@ void WebManager::update() {
     // 2. Uklidíme z paměti klienty, kteří se už odpojili
     ws.cleanupClients();
 
-    // 3. Pokud je připojen alespoň jeden mobil a uplynul požadovaný čas (100 ms), pošleme nová data
+    // 3. Řízení CSI radaru podle aktivního módu
+    if (pState) {
+        AppMode currentMode = pState->getMode();
+        if (currentMode == MODE_WIFI_DETECTION) {
+            if (!wifiCsiManager.isRunning()) {
+                wifiCsiManager.start();
+            }
+            if (pState->popWifiCalibrationRequested()) {
+                wifiCsiManager.startCalibration(5000);
+            }
+            wifiCsiManager.update();
+        } else {
+            if (wifiCsiManager.isRunning()) {
+                wifiCsiManager.stop();
+            }
+        }
+
+        // Neustálé měření síly signálu a vzdálenosti mobilu (ve VŠECH módech)
+        wifiCsiManager.updateDistanceContinuous();
+
+        // Zápis telemetrie do SystemState
+        uint8_t stations = WiFi.softAPgetStationNum();
+        int8_t rssi = wifiCsiManager.getRssi();
+        float dist = wifiCsiManager.getDistanceMeters();
+        bool calib = wifiCsiManager.isCalibrating();
+        uint8_t secLeft = wifiCsiManager.getCalibrationSecondsLeft();
+        float metric = wifiCsiManager.getSmoothedMetric();
+        float thresh = wifiCsiManager.getThreshold();
+        bool motion = wifiCsiManager.isMotionDetected();
+
+        pState->updateWifiMetrics(stations, rssi, dist, calib, secLeft, metric, thresh, motion);
+    }
+
+    // 4. Pokud je připojen alespoň jeden mobil a uplynul požadovaný čas (100 ms), pošleme nová data
     if (ws.count() > 0) {
         unsigned long now = millis(); // Aktuální čas procesoru
         if (now - lastTelemetryMs >= TELEMETRY_INTERVAL_MS) {

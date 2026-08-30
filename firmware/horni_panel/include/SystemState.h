@@ -16,6 +16,7 @@ enum AppMode {
     MODE_2048,
     MODE_VZDALENOST,
     MODE_WIFI_SPOJENI,
+    MODE_WIFI_DETECTION,
     MODE_SERVA,
     MODE_MOTOR,
     MODE_BAREVNY,
@@ -109,6 +110,17 @@ struct SensorData {
     // --- 2x Switche (Páčkové přepínače) ---
     bool switch1;
     bool switch2;
+
+    // --- Wi-Fi Telemetrie & CSI Radar ---
+    uint8_t wifiStationsCount;    // Počet připojených zařízení (0 až 4)
+    int8_t  wifiRssi;             // Síla signálu telefonu v dBm
+    float   wifiDistanceM;        // Spočítaná vzdálenost v metrech
+    bool    wifiCsiCalibrating;   // Probíhá kalibrace radaru
+    uint8_t wifiCsiCalibSecLeft;  // Zbývající sekundy kalibrace (5.. 1.. 0)
+    float   wifiMotionMetric;     // Živá hodnota pohybu (0.5 = klid, 4.0+ = pohyb)
+    float   wifiThreshold;        // Prahová úroveň detekce
+    bool    wifiMotionDetected;   // True = překročen práh detekce (poplach)
+    bool    wifiCalibRequested;   // Příznak požadavku na novou kalibraci
 };
 
 // ---------------------------------------------------------
@@ -238,6 +250,10 @@ public:
             uiNeedsUpdate = true;
             xSemaphoreGive(stateMutex);
         }
+    }
+
+    void toggleInfo() {
+        prepniInfoOverlay();
     }
 
     void checkModeChange() {
@@ -557,6 +573,38 @@ public:
             sensors.segmentValue = value;
             xSemaphoreGive(stateMutex);
         }
+    }
+
+    // --- Wi-Fi Telemetrie & CSI Radar ---
+    void updateWifiMetrics(uint8_t stations, int8_t rssi, float distanceM, bool calibrating, uint8_t secLeft, float metric, float threshold, bool motionDetected) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            sensors.wifiStationsCount = stations;
+            sensors.wifiRssi = rssi;
+            sensors.wifiDistanceM = distanceM;
+            sensors.wifiCsiCalibrating = calibrating;
+            sensors.wifiCsiCalibSecLeft = secLeft;
+            sensors.wifiMotionMetric = metric;
+            sensors.wifiThreshold = threshold;
+            sensors.wifiMotionDetected = motionDetected;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void requestWifiCalibration() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            sensors.wifiCalibRequested = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    bool popWifiCalibrationRequested() {
+        bool res = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            res = sensors.wifiCalibRequested;
+            sensors.wifiCalibRequested = false;
+            xSemaphoreGive(stateMutex);
+        }
+        return res;
     }
 };
 

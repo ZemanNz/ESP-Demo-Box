@@ -488,6 +488,69 @@ input[type="range"] {
 .mt-2 { margin-top: 10px; }
 .text-center { text-align: center; }
 
+/* --- 9. D-PAD DÁLKOVÝ OVLADAČ (5 TLAČÍTEK DO KŘÍŽE) --- */
+.dpad-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin: 15px auto 5px;
+    max-width: 260px;
+    user-select: none;
+}
+
+.dpad-row {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.dpad-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background: #334155;
+    border: 2px solid #475569;
+    color: var(--text-main);
+    font-size: 1.25rem;
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    touch-action: manipulation;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.dpad-btn small {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.dpad-btn:active, .dpad-btn.active {
+    background: var(--primary);
+    border-color: var(--primary-hover);
+    color: #0f172a;
+    transform: scale(0.93);
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+}
+
+.dpad-btn:active small, .dpad-btn.active small {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.dpad-center {
+    background: #1e293b;
+    border-color: var(--accent);
+    color: var(--primary);
+}
+
 /* Patička */
 .app-footer {
     text-align: center;

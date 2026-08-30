@@ -98,6 +98,31 @@
                 </div>
             </div>
 
+            <!-- Karta: Wi-Fi Telemetrie a CSI Radar -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">📡</span>
+                    <h3>Wi-Fi & CSI Pohybový Radar</h3>
+                </div>
+                <div class="grid-2">
+                    <div class="metric-box">
+                        <span class="metric-label">Vzdálenost mobilu</span>
+                        <span class="metric-value" id="val-wifi-dist">-- m</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">CSI Signál / Odchylka</span>
+                        <span class="metric-value" id="val-csi-metric">--</span>
+                    </div>
+                </div>
+                <div class="sub-metric mt-2">
+                    <span>Stav detekce:</span>
+                    <span id="val-csi-motion" class="tag">KLID</span>
+                </div>
+                <div class="text-center mt-2">
+                    <button class="action-btn" onclick="calibrateCsi()">🔄 Znovu kalibrovat radar (5s)</button>
+                </div>
+            </div>
+
             <!-- Karta: Pohybový senzor IMU (Gyroskop a Akcelerometr LSM6DS3) -->
             <div class="card">
                 <div class="card-header">
@@ -186,15 +211,17 @@
                 </div>
                 <div class="mode-grid">
                     <button class="mode-btn" onclick="setAppMode(0)">📋 Menu</button>
-                    <button class="mode-btn" onclick="setAppMode(1)">📈 Senzory</button>
+                    <button class="mode-btn" onclick="setAppMode(1)">🧭 Gyroskop</button>
                     <button class="mode-btn" onclick="setAppMode(2)">🐍 Snake</button>
                     <button class="mode-btn" onclick="setAppMode(3)">🐦 Flappy</button>
                     <button class="mode-btn" onclick="setAppMode(4)">🔢 2048</button>
                     <button class="mode-btn" onclick="setAppMode(5)">📐 Vzdálenost</button>
-                    <button class="mode-btn" onclick="setAppMode(7)">🦾 Serva</button>
-                    <button class="mode-btn" onclick="setAppMode(8)">⚙️ Motor</button>
-                    <button class="mode-btn" onclick="setAppMode(9)">🌈 Barvy</button>
-                    <button class="mode-btn btn-sleep" onclick="setAppMode(10)">💤 Spánek</button>
+                    <button class="mode-btn" onclick="setAppMode(6)">📶 Wi-Fi QR</button>
+                    <button class="mode-btn" onclick="setAppMode(7)">📡 CSI Radar</button>
+                    <button class="mode-btn" onclick="setAppMode(8)">🦾 Serva</button>
+                    <button class="mode-btn" onclick="setAppMode(9)">⚙️ Motor</button>
+                    <button class="mode-btn" onclick="setAppMode(10)">🌈 Barvy</button>
+                    <button class="mode-btn btn-sleep" onclick="setAppMode(11)">💤 Spánek</button>
                 </div>
             </div>
 
@@ -304,6 +331,47 @@
                     <button class="action-btn" onclick="beep(1000, 200)">🔊 Pípnout (1 kHz)</button>
                     <button class="action-btn" onclick="beep(2000, 200)">🔊 Pípnout (2 kHz)</button>
                     <button class="action-btn" onclick="beep(500, 400)">📢 Hluboký tón</button>
+                </div>
+            </div>
+
+            <!-- Dálkový ovladač / 5 tlačítek do kříže (D-Pad) -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🎮</span>
+                    <h3>Dálkový ovladač (5 tlačítek do kříže)</h3>
+                </div>
+                <div class="dpad-container">
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(0, true)" onmouseup="sendBtn(0, false)"
+                                ontouchstart="sendBtn(0, true)" ontouchend="sendBtn(0, false)">
+                            ▲<small>Tlačítko 1</small>
+                        </button>
+                    </div>
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(1, true)" onmouseup="sendBtn(1, false)"
+                                ontouchstart="sendBtn(1, true)" ontouchend="sendBtn(1, false)">
+                            ◀<small>Tlačítko 2</small>
+                        </button>
+                        <button class="dpad-btn dpad-center" 
+                                onmousedown="sendBtn(2, true)" onmouseup="sendBtn(2, false)"
+                                ontouchstart="sendBtn(2, true)" ontouchend="sendBtn(2, false)">
+                            ●<small>OK / 3</small>
+                        </button>
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(3, true)" onmouseup="sendBtn(3, false)"
+                                ontouchstart="sendBtn(3, true)" ontouchend="sendBtn(3, false)">
+                            ▶<small>Tlačítko 4</small>
+                        </button>
+                    </div>
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(4, true)" onmouseup="sendBtn(4, false)"
+                                ontouchstart="sendBtn(4, true)" ontouchend="sendBtn(4, false)">
+                            ▼<small>Tlačítko 5</small>
+                        </button>
+                    </div>
                 </div>
             </div>
         </section>

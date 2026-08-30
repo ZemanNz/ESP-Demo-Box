@@ -6,22 +6,27 @@
 // =============================================================================
 // TENTO SOUBOR UKLÁDÁ CELÝ WEB PŘÍMO DO FLASH PAMĚTI ESP32 (PROGMEM)
 // =============================================================================
-// Výhoda: Nemusí se nahrávat zvlášť souborový systém LittleFS. 
-// Web se nahraje společně s firmwarem jedním klikem tlačítka "Upload".
-// =============================================================================
 
 // --- 1. HTML5 ŠABLONA DASHBOARDU ---
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="cs">
 <head>
+    <!-- Nastavení kódování znaků na UTF-8 (aby fungovala česká diakritika: háčky a čárky) -->
     <meta charset="UTF-8">
+    
+    <!-- Nastavení měřítka zobrazení na mobilu: šířka odpovídá zařízení, zakázáno nechtěné přibližování -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
     <title>ESP-Demo-Box</title>
+    
+    <!-- Odkaz na externí soubor s kaskádovými styly (vzhled, barvy, písmo) -->
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Horní lišta s logem a indikátorem stavu -->
+    <!-- ========================================================================= -->
+    <!-- HORNY LIŠTA (HEADER) S LOGEM A INDIKÁTOREM STAVU SPOJENÍ -->
+    <!-- ========================================================================= -->
     <header class="app-header">
         <div class="logo-area">
             <span class="logo-icon">⚡</span>
@@ -30,23 +35,35 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <p class="subtitle">Bezdrátový řídicí panel</p>
             </div>
         </div>
+        
+        <!-- Odznáček stavu WebSocketu: zelená = Online, žlutá = Připojování, červená = Odpojeno -->
         <div id="status-badge" class="status-badge connecting">
             <span class="dot"></span>
             <span id="status-text">Připojování...</span>
         </div>
     </header>
 
-    <!-- Navigační lišta záložek -->
+    <!-- ========================================================================= -->
+    <!-- NAVIGAČNÍ TLAČÍTKA PRO PŘEPÍNÁNÍ ZÁLOŽEK -->
+    <!-- ========================================================================= -->
     <nav class="tab-bar">
+        <!-- Po kliknutí zavolá JavaScriptovou funkci switchTab() pro zobrazení danej sekce -->
         <button class="tab-btn active" onclick="switchTab('telemetry')">📊 Telemetrie</button>
         <button class="tab-btn" onclick="switchTab('control')">🎛️ Ovládání</button>
         <button class="tab-btn" onclick="switchTab('system')">⚙️ Systém</button>
     </nav>
 
+    <!-- ========================================================================= -->
+    <!-- HLAVNÍ OBSAH (KONTEJNER SE ZÁLOŽKAMI) -->
+    <!-- ========================================================================= -->
     <main class="container">
-        <!-- ==================== ZÁLOŽKA 1: TELEMETRIE ==================== -->
+
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 1: TELEMETRIE (ŽIVÉ ZOBRAZENÍ HODNOT ZE SENZORŮ) -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-telemetry" class="tab-content active">
-            <!-- Klima a Teplota -->
+            
+            <!-- Karta: Teplota a Vlhkost (DHT11) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🌡️</span>
@@ -55,16 +72,18 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 <div class="grid-2">
                     <div class="metric-box">
                         <span class="metric-label">Teplota</span>
+                        <!-- ID pro dynamický přepis z JavaScriptu: val-temp -->
                         <span class="metric-value"><span id="val-temp">--</span> °C</span>
                     </div>
                     <div class="metric-box">
                         <span class="metric-label">Vlhkost</span>
+                        <!-- ID pro dynamický přepis z JavaScriptu: val-hum -->
                         <span class="metric-value"><span id="val-hum">--</span> %</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Vzdálenosti -->
+            <!-- Karta: Senzory vzdálenosti (Laser ToF, Ultrazvuk, IR) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📏</span>
@@ -90,7 +109,32 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- IMU Senzor pohybu -->
+            <!-- Karta: Wi-Fi Telemetrie a CSI Radar -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">📡</span>
+                    <h3>Wi-Fi & CSI Pohybový Radar</h3>
+                </div>
+                <div class="grid-2">
+                    <div class="metric-box">
+                        <span class="metric-label">Vzdálenost mobilu</span>
+                        <span class="metric-value" id="val-wifi-dist">-- m</span>
+                    </div>
+                    <div class="metric-box">
+                        <span class="metric-label">CSI Signál / Odchylka</span>
+                        <span class="metric-value" id="val-csi-metric">--</span>
+                    </div>
+                </div>
+                <div class="sub-metric mt-2">
+                    <span>Stav detekce:</span>
+                    <span id="val-csi-motion" class="tag">KLID</span>
+                </div>
+                <div class="text-center mt-2">
+                    <button class="action-btn" onclick="calibrateCsi()">🔄 Znovu kalibrovat radar (5s)</button>
+                </div>
+            </div>
+
+            <!-- Karta: Pohybový senzor IMU (Gyroskop a Akcelerometr LSM6DS3) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🧭</span>
@@ -116,7 +160,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Světlo a Barva -->
+            <!-- Karta: Světlo (Fotorezistory) a Barevný senzor (TCS34725) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🎨</span>
@@ -132,6 +176,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                         <span class="metric-value" id="val-photo2">--</span>
                     </div>
                 </div>
+                <!-- Náhled změřené barvy se dynamicky vybarvuje v JavaScriptu -->
                 <div class="color-preview-box mt-2">
                     <div id="color-preview" class="color-circle"></div>
                     <div class="color-text">
@@ -140,7 +185,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Fyzické ovládací prvky a tlačítka -->
+            <!-- Karta: Fyzické vstupy (Joystick, Enkodér, Potenciometr, Tlačítka) -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🕹️</span>
@@ -164,9 +209,12 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
             </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA 2: OVLÁDÁNÍ ==================== -->
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 2: OVLÁDÁNÍ (OVLÁDACÍ PRVKY PRO SERVA, LEDKY, MOTORY, MÓDY) -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-control" class="tab-content">
-            <!-- Výběr Režimu obrazovky -->
+            
+            <!-- Výběr aktivního módu obrazovky na ESP32 -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">📱</span>
@@ -174,19 +222,21 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
                 <div class="mode-grid">
                     <button class="mode-btn" onclick="setAppMode(0)">📋 Menu</button>
-                    <button class="mode-btn" onclick="setAppMode(1)">📈 Senzory</button>
+                    <button class="mode-btn" onclick="setAppMode(1)">🧭 Gyroskop</button>
                     <button class="mode-btn" onclick="setAppMode(2)">🐍 Snake</button>
                     <button class="mode-btn" onclick="setAppMode(3)">🐦 Flappy</button>
                     <button class="mode-btn" onclick="setAppMode(4)">🔢 2048</button>
                     <button class="mode-btn" onclick="setAppMode(5)">📐 Vzdálenost</button>
-                    <button class="mode-btn" onclick="setAppMode(7)">🦾 Serva</button>
-                    <button class="mode-btn" onclick="setAppMode(8)">⚙️ Motor</button>
-                    <button class="mode-btn" onclick="setAppMode(9)">🌈 Barvy</button>
-                    <button class="mode-btn btn-sleep" onclick="setAppMode(10)">💤 Spánek</button>
+                    <button class="mode-btn" onclick="setAppMode(6)">📶 Wi-Fi QR</button>
+                    <button class="mode-btn" onclick="setAppMode(7)">📡 CSI Radar</button>
+                    <button class="mode-btn" onclick="setAppMode(8)">🦾 Serva</button>
+                    <button class="mode-btn" onclick="setAppMode(9)">⚙️ Motor</button>
+                    <button class="mode-btn" onclick="setAppMode(10)">🌈 Barvy</button>
+                    <button class="mode-btn btn-sleep" onclick="setAppMode(11)">💤 Spánek</button>
                 </div>
             </div>
 
-            <!-- Stavové LED Diody -->
+            <!-- Přepínače 3x stavových LED diod -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">💡</span>
@@ -217,20 +267,23 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- RGB LED Pásek WS2812B -->
+            <!-- Ovládání RGB LED pásku WS2812B -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">✨</span>
                     <h3>RGB LED Pásek</h3>
                 </div>
+                <!-- Paleta barev (Color picker) -->
                 <div class="control-row">
                     <label>Barva pásku:</label>
                     <input type="color" id="ctrl-rgb-color" value="#ff0000" onchange="updateRgbStrip()">
                 </div>
+                <!-- Posuvník jasu -->
                 <div class="control-row mt-2">
                     <label>Jas: <b id="lbl-rgb-bright">60</b></label>
                     <input type="range" id="ctrl-rgb-bright" min="0" max="255" value="60" oninput="updateRgbBright(this.value)">
                 </div>
+                <!-- Rychlá tlačítka barevných předvoleb -->
                 <div class="color-presets mt-2">
                     <button class="preset-btn" style="background:#ff0000;" onclick="setRgbPreset('#ff0000')"></button>
                     <button class="preset-btn" style="background:#00ff00;" onclick="setRgbPreset('#00ff00')"></button>
@@ -242,12 +295,13 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Servomotory a Motory -->
+            <!-- Posuvníky pro Serva a Motor -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">⚙️</span>
                     <h3>Pohony & Serva</h3>
                 </div>
+                <!-- Klasické servo 0 až 180 stupňů -->
                 <div class="slider-group">
                     <div class="slider-header">
                         <span>Klasické Servo (0–180°):</span>
@@ -256,6 +310,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <input type="range" id="ctrl-servo" min="0" max="180" value="90" oninput="onServoChange(this.value)">
                 </div>
 
+                <!-- Chytré servo -180 až +180 stupňů -->
                 <div class="slider-group mt-2">
                     <div class="slider-header">
                         <span>Chytré Servo (-180° až +180°):</span>
@@ -264,6 +319,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <input type="range" id="ctrl-smartservo" min="-180" max="180" value="0" oninput="onSmartServoChange(this.value)">
                 </div>
 
+                <!-- Rychlost a směr motoru (-255 až +255) -->
                 <div class="slider-group mt-2">
                     <div class="slider-header">
                         <span>Motor / PWM Rychlost:</span>
@@ -276,7 +332,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                 </div>
             </div>
 
-            <!-- Bzučák -->
+            <!-- Ovládání bzučáku -->
             <div class="card">
                 <div class="card-header">
                     <span class="card-icon">🔔</span>
@@ -288,9 +344,52 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <button class="action-btn" onclick="beep(500, 400)">📢 Hluboký tón</button>
                 </div>
             </div>
+
+            <!-- Dálkový ovladač / 5 tlačítek do kříže (D-Pad) -->
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-icon">🎮</span>
+                    <h3>Dálkový ovladač (5 tlačítek do kříže)</h3>
+                </div>
+                <div class="dpad-container">
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(0, true)" onmouseup="sendBtn(0, false)"
+                                ontouchstart="sendBtn(0, true)" ontouchend="sendBtn(0, false)">
+                            ▲<small>Tlačítko 1</small>
+                        </button>
+                    </div>
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(1, true)" onmouseup="sendBtn(1, false)"
+                                ontouchstart="sendBtn(1, true)" ontouchend="sendBtn(1, false)">
+                            ◀<small>Tlačítko 2</small>
+                        </button>
+                        <button class="dpad-btn dpad-center" 
+                                onmousedown="sendBtn(2, true)" onmouseup="sendBtn(2, false)"
+                                ontouchstart="sendBtn(2, true)" ontouchend="sendBtn(2, false)">
+                            ●<small>OK / 3</small>
+                        </button>
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(3, true)" onmouseup="sendBtn(3, false)"
+                                ontouchstart="sendBtn(3, true)" ontouchend="sendBtn(3, false)">
+                            ▶<small>Tlačítko 4</small>
+                        </button>
+                    </div>
+                    <div class="dpad-row">
+                        <button class="dpad-btn" 
+                                onmousedown="sendBtn(4, true)" onmouseup="sendBtn(4, false)"
+                                ontouchstart="sendBtn(4, true)" ontouchend="sendBtn(4, false)">
+                            ▼<small>Tlačítko 5</small>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </section>
 
-        <!-- ==================== ZÁLOŽKA 3: SYSTÉM ==================== -->
+        <!-- --------------------------------------------------------------------- -->
+        <!-- ZÁLOŽKA 3: SYSTÉMOVÉ INFORMACE -->
+        <!-- --------------------------------------------------------------------- -->
         <section id="tab-system" class="tab-content">
             <div class="card">
                 <div class="card-header">
@@ -309,38 +408,50 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         </section>
     </main>
 
+    <!-- Patička webu -->
     <footer class="app-footer">
         <span>ESP-Demo-Box © 2026</span>
     </footer>
 
+    <!-- Načtení JavaScriptového skriptu pro spojení s WebSocketem -->
     <script src="script.js"></script>
 </body>
 </html>
+
 )rawliteral";
 
-// --- 2. CSS STYLY (Tmavý motiv) ---
+// --- 2. KASKÁDOVÉ STYLY (CSS) ---
 const char STYLE_CSS[] PROGMEM = R"rawliteral(
+/* =============================================================================
+   KASKÁDOVÉ STYLY (CSS) PRO OVLÁDACÍ PANEL ESP-DEMO-BOX
+   =============================================================================
+   Tento soubor určuje barvy, písmo, velikosti, rozložení karet a animace webu.
+   Je navržen v moderním tmavém motivu (Dark Mode) pro skvělý vzhled na mobilu.
+   ============================================================================= */
+
+/* --- 1. DEFINICE GLOBÁLNÍCH BAREVNÝCH PROMĚNNÝCH (:root) --- */
 :root {
-    --bg-color: #0f172a;
-    --card-bg: #1e293b;
-    --card-border: #334155;
-    --primary: #38bdf8;
-    --primary-hover: #0ea5e9;
-    --accent: #6366f1;
-    --text-main: #f8fafc;
-    --text-muted: #94a3b8;
-    --success: #22c55e;
-    --danger: #ef4444;
-    --warning: #f59e0b;
-    --radius: 12px;
+    --bg-color: #0f172a;       /* Tmavě modré pozadí celé stránky */
+    --card-bg: #1e293b;        /* Světlejší tmavé pozadí jednotlivých karet */
+    --card-border: #334155;    /* Barva jemného rámečku kolem karet */
+    --primary: #38bdf8;        /* Hlavní zvýrazňovací azurová barva */
+    --primary-hover: #0ea5e9;  /* Barva tlačítka při stisku */
+    --accent: #6366f1;         /* Sekundární fialová barva */
+    --text-main: #f8fafc;      /* Hlavní bílý text */
+    --text-muted: #94a3b8;     /* Šedý doplňkový text */
+    --success: #22c55e;        /* Zelená pro stav Online a úspěch */
+    --danger: #ef4444;         /* Červená pro odpojení a zastavení */
+    --warning: #f59e0b;        /* Žlutá pro varování a připojování */
+    --radius: 12px;            /* Poloměr zakulacení rohů karet a tlačítek */
 }
 
+/* Reseting okrajů a výchozího nastavení prvků */
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    -webkit-tap-highlight-color: transparent;
+    -webkit-tap-highlight-color: transparent; /* Vypne modré bliknutí při klepnutí prstem na mobilu */
 }
 
 body {
@@ -352,7 +463,7 @@ body {
     padding-bottom: 20px;
 }
 
-/* Hlavička */
+/* --- 2. HORNÍ LIŠTA (HEADER) --- */
 .app-header {
     background: var(--card-bg);
     border-bottom: 1px solid var(--card-border);
@@ -360,7 +471,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    position: sticky;
+    position: sticky; /* Lišta zůstane přišpendlená nahoře i při skrolování */
     top: 0;
     z-index: 50;
 }
@@ -388,6 +499,7 @@ body {
     color: var(--text-muted);
 }
 
+/* Odznáček stavu spojení (Připojování / Online / Odpojeno) */
 .status-badge {
     display: flex;
     align-items: center;
@@ -405,6 +517,7 @@ body {
     background: var(--warning);
 }
 
+/* Stav Online (Zelené světlo) */
 .status-badge.online {
     background: rgba(34, 197, 94, 0.15);
     color: var(--success);
@@ -414,6 +527,7 @@ body {
     box-shadow: 0 0 8px var(--success);
 }
 
+/* Stav Odpojeno (Červené světlo) */
 .status-badge.offline {
     background: rgba(239, 68, 68, 0.15);
     color: var(--danger);
@@ -422,7 +536,7 @@ body {
     background: var(--danger);
 }
 
-/* Lišta záložek */
+/* --- 3. LIŠTA ZÁLOŽEK --- */
 .tab-bar {
     display: flex;
     background: #111827;
@@ -444,13 +558,14 @@ body {
     transition: all 0.2s ease;
 }
 
+/* Aktivní záložka */
 .tab-btn.active {
     background: var(--card-bg);
     color: var(--primary);
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
-/* Kontejner karet */
+/* --- 4. KARTY A HLAVNÍ OBSAH --- */
 .container {
     padding: 16px;
     flex: 1;
@@ -460,15 +575,16 @@ body {
 }
 
 .tab-content {
-    display: none;
+    display: none; /* Neaktivní záložky skryjeme */
     flex-direction: column;
     gap: 14px;
 }
 
 .tab-content.active {
-    display: flex;
+    display: flex; /* Aktivní záložku zobrazíme */
 }
 
+/* Vzhled samostatné karty */
 .card {
     background: var(--card-bg);
     border: 1px solid var(--card-border);
@@ -494,7 +610,7 @@ body {
     font-size: 1.1rem;
 }
 
-/* Mřížky (Grid) */
+/* --- 5. ROZLOŽENÍ DATOVÝCH POLÍ (GRID) --- */
 .grid-2 {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -536,6 +652,7 @@ body {
     justify-content: space-between;
 }
 
+/* Štítek / Visačka (nástrojový stav) */
 .tag {
     background: #334155;
     padding: 2px 8px;
@@ -612,7 +729,7 @@ body {
     font-weight: bold;
 }
 
-/* Tlačítka výběru módu */
+/* --- 6. STYLOVÁNÍ OVLÁDACÍCH TLAČÍTEK --- */
 .mode-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -648,7 +765,7 @@ body {
     color: #fed7aa;
 }
 
-/* Přepínače LED diod */
+/* --- 7. DOTYKOVÉ PŘEPÍNAČE (SWITCHES FOR LEDS) --- */
 .led-controls {
     display: flex;
     justify-content: space-around;
@@ -776,7 +893,7 @@ input[type="range"] {
     cursor: pointer;
 }
 
-/* Systémová tabulka */
+/* --- 8. SYSTÉMOVÁ TABULKA --- */
 .sys-info-table {
     display: flex;
     flex-direction: column;
@@ -795,6 +912,69 @@ input[type="range"] {
 .mt-2 { margin-top: 10px; }
 .text-center { text-align: center; }
 
+/* --- 9. D-PAD DÁLKOVÝ OVLADAČ (5 TLAČÍTEK DO KŘÍŽE) --- */
+.dpad-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    margin: 15px auto 5px;
+    max-width: 260px;
+    user-select: none;
+}
+
+.dpad-row {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.dpad-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    background: #334155;
+    border: 2px solid #475569;
+    color: var(--text-main);
+    font-size: 1.25rem;
+    font-weight: 700;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.1s ease;
+    touch-action: manipulation;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.dpad-btn small {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.dpad-btn:active, .dpad-btn.active {
+    background: var(--primary);
+    border-color: var(--primary-hover);
+    color: #0f172a;
+    transform: scale(0.93);
+    box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+}
+
+.dpad-btn:active small, .dpad-btn.active small {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.dpad-center {
+    background: #1e293b;
+    border-color: var(--accent);
+    color: var(--primary);
+}
+
 /* Patička */
 .app-footer {
     text-align: center;
@@ -802,70 +982,90 @@ input[type="range"] {
     color: var(--text-muted);
     padding: 10px;
 }
+
 )rawliteral";
 
 // --- 3. JAVASCRIPT KLIENT ---
 const char SCRIPT_JS[] PROGMEM = R"rawliteral(
-let ws = null;
-let reconnectTimer = null;
-let currentAppMode = 0;
+// =============================================================================
+// JAVASCRIPT PRO OVLÁDACÍ PANEL ESP-DEMO-BOX
+// =============================================================================
 
+// Globální proměnné pro správu spojení a stavu
+let ws = null;              // Proměnná držící otevřený WebSocket objekt
+let reconnectTimer = null;  // Časovač pro automatické obnovení spojení při výpadku
+let currentAppMode = 0;     // Číslo aktuálního aktivního režimu na ESP32
+
+// Názvy jednotlivých módů pro hezké vypsání v záložce Systém
 const modeNames = [
-    "Hlavní menu", "Senzory", "Hra Snake", "Hra Flappy", "Hra 2048",
-    "Měření vzdálenosti", "Wi-Fi spojení", "Ovládání serv", "Ovládání motoru",
+    "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048",
+    "Měření vzdálenosti", "Wi-Fi QR spojení", "Wi-Fi CSI Radar", "Ovládání serv", "Ovládání motoru",
     "Barevný senzor", "Spánkový režim"
 ];
 
+// --- 1. Spuštění při načtení stránky v prohlížeči ---
 window.addEventListener('load', () => {
-    initWebSocket();
+    initWebSocket(); // Ihned po otevření webu navážeme spojení s ESP32
 });
 
+// --- 2. Přepínání záložek (Telemetrie / Ovládání / Systém) ---
 function switchTab(tabId) {
+    // Odznačíme všechna tlačítka záložek a skryjeme všechny sekce
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
 
+    // Najdeme kliknuté tlačítko a aktivujeme ho
     const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabId));
     if (activeBtn) activeBtn.classList.add('active');
 
+    // Zobrazíme odpovídající sekci s obsahem
     const activeContent = document.getElementById(`tab-${tabId}`);
     if (activeContent) activeContent.classList.add('active');
 }
 
+// --- 3. Inicializace a správa WebSocket spojení ---
 function initWebSocket() {
+    // Sestavíme adresu: "ws://" + IP adresa v prohlížeči (např. 192.168.4.1) + "/ws"
     const wsUrl = `ws://${location.host}/ws`;
     const statusBadge = document.getElementById('status-badge');
     const statusText = document.getElementById('status-text');
 
+    // Nastavíme odznáček stavu na "Připojování..."
     statusBadge.className = 'status-badge connecting';
     statusText.innerText = 'Připojování...';
 
     try {
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(wsUrl); // Pokusíme se otevřít WebSocket linku
 
+        // Událost: Spojení úspěšně navázáno
         ws.onopen = () => {
-            statusBadge.className = 'status-badge online';
+            statusBadge.className = 'status-badge online'; // Zelený odznáček
             statusText.innerText = 'Online';
+            // Pokud běžel časovač pro znovupřipojení, zrušíme ho
             if (reconnectTimer) {
                 clearTimeout(reconnectTimer);
                 reconnectTimer = null;
             }
         };
 
+        // Událost: Spojení se přerušilo (např. ESP32 se restartovalo nebo jsme daleko od Wi-Fi)
         ws.onclose = () => {
-            statusBadge.className = 'status-badge offline';
+            statusBadge.className = 'status-badge offline'; // Červený odznáček
             statusText.innerText = 'Odpojeno';
-            scheduleReconnect();
+            scheduleReconnect(); // Začneme se automaticky znovu připojovat
         };
 
+        // Událost: Chyba spojení
         ws.onerror = (err) => {
             console.error('WS Chyba:', err);
-            ws.close();
+            ws.close(); // Uzavřeme spojení a spustíme reconnect
         };
 
+        // Událost: Z ESP32 dorazila nová zpráva (telemetrie)
         ws.onmessage = (event) => {
             try {
-                const data = JSON.parse(event.data);
-                handleTelemetry(data);
+                const data = JSON.parse(event.data); // Převedeme text JSONu na JavaScriptový objekt
+                handleTelemetry(data);               // Předáme data k vykreslení do HTML
             } catch (e) {
                 console.error('Chyba parsovani zpravy:', e, event.data);
             }
@@ -877,30 +1077,48 @@ function initWebSocket() {
     }
 }
 
+// Funkce pro naplánování znovupřipojení za 2 sekundy
 function scheduleReconnect() {
     if (!reconnectTimer) {
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
-            initWebSocket();
+            initWebSocket(); // Zkusíme se znovu připojit
         }, 2000);
     }
 }
 
+// Odeslání JSON příkazu z webu do ESP32
 function sendCmd(cmd, payload = {}) {
     if (ws && ws.readyState === WebSocket.OPEN) {
+        // Zabalíme příkaz a doplňující data do jednoho JSON řetězce
         const msg = JSON.stringify({ cmd, ...payload });
-        ws.send(msg);
+        ws.send(msg); // Odešleme přes WebSocket do ESP32
     }
 }
 
+// --- 4. Zpracování příchozích dat ze senzorů a přepsání hodnot v HTML ---
 function handleTelemetry(d) {
+    // 1. Prostředí (Teplota a Vlhkost)
     if (d.t !== undefined) setText('val-temp', d.t > -100 ? d.t.toFixed(1) : '--');
     if (d.h !== undefined) setText('val-hum', d.h >= 0 ? d.h.toFixed(1) : '--');
 
+    // 2. Vzdálenosti
     if (d.laser !== undefined) setText('val-laser', d.laser);
     if (d.ultra !== undefined) setText('val-ultra', d.ultra >= 0 ? d.ultra.toFixed(1) : '--');
     if (d.ir !== undefined) setText('val-ir', d.ir >= 0 ? d.ir.toFixed(1) : '--');
     
+    // Wi-Fi Telemetrie & CSI Radar
+    if (d.wifi_dist !== undefined) setText('val-wifi-dist', d.wifi_dist > 0.1 ? d.wifi_dist.toFixed(1) + ' m' : '---');
+    if (d.csi_metric !== undefined) setText('val-csi-metric', d.csi_metric.toFixed(2));
+    if (d.csi_motion !== undefined) {
+        const motEl = document.getElementById('val-csi-motion');
+        if (motEl) {
+            motEl.innerText = d.csi_motion ? '🚨 POHYB DETEKOVÁN!' : 'KLID';
+            motEl.className = d.csi_motion ? 'tag active' : 'tag';
+        }
+    }
+    
+    // IR detekce překážky (změna barvy visačky)
     if (d.irobs !== undefined) {
         const obsEl = document.getElementById('val-ir-obs');
         if (obsEl) {
@@ -909,6 +1127,7 @@ function handleTelemetry(d) {
         }
     }
 
+    // 3. Gyroskop a Akcelerometr (LSM6DS3)
     if (d.ax !== undefined) setText('val-ax', d.ax.toFixed(2));
     if (d.ay !== undefined) setText('val-ay', d.ay.toFixed(2));
     if (d.az !== undefined) setText('val-az', d.az.toFixed(2));
@@ -916,18 +1135,21 @@ function handleTelemetry(d) {
     if (d.gy !== undefined) setText('val-gy', d.gy.toFixed(1));
     if (d.gz !== undefined) setText('val-gz', d.gz.toFixed(1));
 
+    // 4. Světlo a Barva
     if (d.p1 !== undefined) setText('val-photo1', d.p1);
     if (d.p2 !== undefined) setText('val-photo2', d.p2);
     if (d.cr !== undefined && d.cg !== undefined && d.cb !== undefined) {
         setText('val-cr', d.cr);
         setText('val-cg', d.cg);
         setText('val-cb', d.cb);
+        // Obarvíme náhledové kolečko skutečnou barvou, kterou senzor vidí
         const colPrev = document.getElementById('color-preview');
         if (colPrev) {
             colPrev.style.backgroundColor = `rgb(${d.cr}, ${d.cg}, ${d.cb})`;
         }
     }
 
+    // 5. Vstupy, Tlačítka a Joystick
     if (d.jx !== undefined) setText('val-jx', d.jx);
     if (d.jy !== undefined) setText('val-jy', d.jy);
     if (d.jbtn !== undefined) {
@@ -956,6 +1178,7 @@ function handleTelemetry(d) {
     if (d.sw1 !== undefined) setText('val-sw1', d.sw1 ? 'ON' : 'OFF');
     if (d.sw2 !== undefined) setText('val-sw2', d.sw2 ? 'ON' : 'OFF');
 
+    // 5 tlačítek na spodním panelu (rozsvícení modrého tlačítka při stisku)
     if (d.btnd && Array.isArray(d.btnd)) {
         for (let i = 0; i < 5; i++) {
             const btnEl = document.getElementById(`btn-d${i+1}`);
@@ -966,12 +1189,14 @@ function handleTelemetry(d) {
         }
     }
 
+    // 6. Systém a Režim
     if (d.mode !== undefined) {
         currentAppMode = d.mode;
         setText('sys-mode', modeNames[d.mode] || `Mód ${d.mode}`);
-        updateActiveModeButtons(d.mode);
+        updateActiveModeButtons(d.mode); // Zvýrazníme tlačítko aktuálního režimu
     }
     if (d.uptime !== undefined) {
+        // Přepočet milisekund na hodiny, minuty a sekundy
         const sec = Math.floor(d.uptime / 1000);
         const mins = Math.floor(sec / 60);
         const hrs = Math.floor(mins / 60);
@@ -980,21 +1205,25 @@ function handleTelemetry(d) {
     if (d.heap !== undefined) setText('sys-heap', `${(d.heap / 1024).toFixed(1)} KB`);
     if (d.clients !== undefined) setText('sys-clients', d.clients);
 
+    // Synchronizace polohy přepínačů LED (pokud na ně uživatel zrovna nesahá)
     if (d.led1 !== undefined) setCheck('ctrl-led1', d.led1);
     if (d.led2 !== undefined) setCheck('ctrl-led2', d.led2);
     if (d.led3 !== undefined) setCheck('ctrl-led3', d.led3);
 }
 
+// Pomocná funkce pro bezpečný přepis textu v elementu
 function setText(id, val) {
     const el = document.getElementById(id);
     if (el) el.innerText = val;
 }
 
+// Pomocná funkce pro nastavení stavu checkboxu
 function setCheck(id, val) {
     const el = document.getElementById(id);
     if (el && document.activeElement !== el) el.checked = val;
 }
 
+// Zvýrazní tlačítko právě aktivního módu v sekci Ovládání
 function updateActiveModeButtons(mode) {
     document.querySelectorAll('.mode-btn').forEach(btn => {
         const oc = btn.getAttribute('onclick') || '';
@@ -1006,14 +1235,19 @@ function updateActiveModeButtons(mode) {
     });
 }
 
+// --- 5. Ovládací funkce volané z HTML prvků ---
+
+// Přepnutí herního / systémového módu na displeji ESP
 function setAppMode(mode) {
     sendCmd('setMode', { mode: parseInt(mode) });
 }
 
+// Zapnutí / vypnutí stavové LED
 function toggleLed(id, state) {
     sendCmd('setLed', { id: parseInt(id), state: state });
 }
 
+// --- THROTTLE (Omezovač rychlosti): Chrání Wi-Fi před zahlcením při tahání slideru ---
 function throttle(func, limit) {
     let inThrottle;
     return function() {
@@ -1027,49 +1261,68 @@ function throttle(func, limit) {
     };
 }
 
+// Pohyb klasickým servem (max 20 zpráv za sekundu)
 const onServoChange = throttle((val) => {
     document.getElementById('lbl-servo').innerText = `${val}°`;
     sendCmd('setServo', { val: parseInt(val) });
 }, 50);
 
+// Pohyb chytrým servem
 const onSmartServoChange = throttle((val) => {
     document.getElementById('lbl-smartservo').innerText = `${val}°`;
     sendCmd('setSmartServo', { val: parseInt(val) });
 }, 50);
 
+// Změna rychlosti motoru
 const onMotorChange = throttle((val) => {
     document.getElementById('lbl-motor').innerText = val;
     sendCmd('setMotor', { val: parseInt(val) });
 }, 50);
 
+// Tlačítko pro okamžité zastavení motoru na nulu
 function stopMotor() {
     document.getElementById('ctrl-motor').value = 0;
     document.getElementById('lbl-motor').innerText = 0;
     sendCmd('setMotor', { val: 0 });
 }
 
+// Odeslání barvy a jasu na RGB pásek WS2812B
 function updateRgbStrip() {
     const hex = document.getElementById('ctrl-rgb-color').value;
-    const r = parseInt(hex.substr(1,2), 16);
-    const g = parseInt(hex.substr(3,2), 16);
-    const b = parseInt(hex.substr(5,2), 16);
+    const r = parseInt(hex.substr(1,2), 16); // Převod HEX na červenou (0-255)
+    const g = parseInt(hex.substr(3,2), 16); // Převod HEX na zelenou (0-255)
+    const b = parseInt(hex.substr(5,2), 16); // Převod HEX na modrou (0-255)
     const bright = parseInt(document.getElementById('ctrl-rgb-bright').value);
     sendCmd('setLedStrip', { r, g, b, bright });
 }
 
+// Plynulá změna jasu RGB pásku
 const updateRgbBright = throttle((bright) => {
     document.getElementById('lbl-rgb-bright').innerText = bright;
     updateRgbStrip();
 }, 50);
 
+// Rychlé tlačítko barevné předvolby (červená, zelená, modrá atd.)
 function setRgbPreset(hex) {
     document.getElementById('ctrl-rgb-color').value = hex;
     updateRgbStrip();
 }
 
+// Zazvonění bzučákem
 function beep(freq, durationMs) {
     sendCmd('beep', { freq: parseInt(freq), duration: parseInt(durationMs) });
 }
+
+// Spuštění 5sekundové kalibrace Wi-Fi CSI radaru
+function calibrateCsi() {
+    sendCmd('calibrateCsi');
+}
+
+// Virtuální stisk tlačítka D-Padu (5 tlačítek do kříže)
+function sendBtn(index, isPressed) {
+    sendCmd('pressBtn', { idx: parseInt(index), pressed: isPressed });
+}
+
 )rawliteral";
 
 #endif // WEB_PAGES_H

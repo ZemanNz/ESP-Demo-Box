@@ -43,12 +43,19 @@ void Task_UART_Simulator(void *pvParameters) {
     Serial.println(xPortGetCoreID());
 
     int timeInMode = 0;
+    AppMode lastMode = globalState.getMode();
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50)); 
-        timeInMode += 50;
         
         AppMode current = globalState.getMode();
+        if (current != lastMode) {
+            timeInMode = 0; // Uživatel ručně změnil mód (z webu nebo tlačítkem) -> resetujeme časovač!
+            lastMode = current;
+        } else {
+            timeInMode += 50;
+        }
+        
         float t = millis() / 1000.0f;
 
         // ---------------------------------------------------------
@@ -105,25 +112,28 @@ void Task_UART_Simulator(void *pvParameters) {
         }
 
         // ---------------------------------------------------------
-        // 2. PŘEPÍNÁNÍ POUZE MEZI 4 MÓDY PO 10 SEKUNDÁCH (10 000 ms)
+        // 2. PŘEPÍNÁNÍ MEZI MÓDY (Wi-Fi módy 40s, ostatní 10s)
         // ---------------------------------------------------------
-        if (timeInMode >= 10000) {
+        int requiredDuration = (current == MODE_WIFI_SPOJENI || current == MODE_WIFI_DETECTION) ? 40000 : 10000;
+        if (timeInMode >= requiredDuration) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
             
             if (current == MODE_MAIN_MENU) {
-                nextMode = MODE_GYRO; // GYROSKOP
+                nextMode = MODE_GYRO; // GYROSKOP (10s)
             } else if (current == MODE_GYRO) {
-                nextMode = MODE_BAREVNY; // BAREVNÝ SENZOR
+                nextMode = MODE_BAREVNY; // BAREVNÝ SENZOR (10s)
             } else if (current == MODE_BAREVNY) {
-                nextMode = MODE_VZDALENOST; // VZDÁLENOST
+                nextMode = MODE_VZDALENOST; // VZDÁLENOST (10s)
             } else if (current == MODE_VZDALENOST) {
-                nextMode = MODE_WIFI_SPOJENI; // WIFI SPOJENÍ & QR KÓD
+                nextMode = MODE_WIFI_SPOJENI; // WIFI SPOJENÍ & QR KÓD (40s)
+            } else if (current == MODE_WIFI_SPOJENI) {
+                nextMode = MODE_WIFI_DETECTION; // WIFI CSI DETEKCE POHYBU (40s)
             } else {
-                nextMode = MODE_MAIN_MENU; // Zpět do HLAVNÍHO MENU
+                nextMode = MODE_MAIN_MENU; // Zpět do HLAVNÍHO MENU (10s)
             }
 
-            Serial.printf("[DEMO 5-MODU] Prepinam na mod: %d\n", (int)nextMode);
+            Serial.printf("[DEMO 6-MODU] Prepinam na mod: %d (doba: %d s)\n", (int)nextMode, (nextMode == MODE_WIFI_SPOJENI || nextMode == MODE_WIFI_DETECTION) ? 40 : 10);
             globalState.setMode(nextMode);
         }
     }
@@ -309,6 +319,7 @@ void Task_Sensors(void *pvParameters) {
             case MODE_2048:
             case MODE_VZDALENOST:
             case MODE_WIFI_SPOJENI:
+            case MODE_WIFI_DETECTION:
             case MODE_SERVA:
             case MODE_MOTOR:
             case MODE_BAREVNY: {
@@ -331,14 +342,43 @@ void Task_Display_UI(void *pvParameters) {
     byte delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
 
     // Inicializace gfx je hotová v HardwareSetup. Nyní můžeme kreslit.
+    static bool lastBtnDown[5] = {false, false, false, false, false};
+    static bool lastBtnTop = false;
+    static int32_t lastEncoderPos = 0;
+
     for (;;) {
         // 1. Zjistíme, v jakém stavu se kufr zrovna nachází
         AppMode currentMode = globalState.getMode();
+
+        // ---------------------------------------------------------
+        // OBSLUHA FYZICKÝCH / VIRTUÁLNÍCH TLAČÍTEK A ENKODÉRU PRO PŘEPÍNÁNÍ MÓDŮ
+        // ---------------------------------------------------------
+        SensorData currentSensors = globalState.getSensorData();
+
+        // A) Enkodér pro procházení módů
+        int32_t encDiff = currentSensors.encoderPos - lastEncoderPos;
+        if (abs(encDiff) >= 4) {
+            int step = (encDiff > 0) ? 1 : -1;
+            int nextM = ((int)currentMode + step + 12) % 12;
+            globalState.setMode((AppMode)nextM);
+            currentMode = (AppMode)nextM;
+            lastEncoderPos = currentSensors.encoderPos;
+        }
+
+        // Horní fyzické tlačítko: Návrat do Menu nebo info
+        if (currentSensors.btnTop && !lastBtnTop) {
+            if (currentMode != MODE_MAIN_MENU) {
+                globalState.setMode(MODE_MAIN_MENU);
+                currentMode = MODE_MAIN_MENU;
+            } else {
+                globalState.toggleInfo();
+            }
+        }
+        lastBtnTop = currentSensors.btnTop;
         
         // 2. Potřebujeme kompletně překreslit obrazovku? 
         // (Vlajka je true jen těsně po přepnutí stavu nebo stisku tlačítka)
         bool needsFullRedraw = globalState.popUiNeedsUpdate();
-
 
         //vykreslujeme info?
         bool infoActive = globalState.isInfoActive();
@@ -857,10 +897,32 @@ void Task_Display_UI(void *pvParameters) {
             // =======================================================
             case MODE_2048: {
                 delay = 50;
+                SensorData data = globalState.getSensorData();
+                static bool g2048_lastBtn[5] = {false, false, false, false, false};
+
                 if (needsFullRedraw) {
                     g2048.reset();
                     g2048.pohyb = true; // Vynutíme první vykreslení po startu hry
                 }
+
+                // Ovládání tlačítky (D-Pad / 5 tlačítek)
+                if (data.btnDown[0] && !g2048_lastBtn[0]) g2048.moveUp();
+                if (data.btnDown[4] && !g2048_lastBtn[4]) g2048.moveDown();
+                if (data.btnDown[1] && !g2048_lastBtn[1]) g2048.moveLeft();
+                if (data.btnDown[3] && !g2048_lastBtn[3]) g2048.moveRight();
+                if (data.btnDown[2] && !g2048_lastBtn[2]) g2048.reset();
+
+                // Ovládání analogovým joystickem
+                static bool joyMoved = false;
+                if (data.joyY > 2800 && !joyMoved) { g2048.moveUp(); joyMoved = true; }
+                else if (data.joyY < 1200 && !joyMoved) { g2048.moveDown(); joyMoved = true; }
+                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft(); joyMoved = true; }
+                else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; }
+                else if (data.joyX >= 1200 && data.joyX <= 2800 && data.joyY >= 1200 && data.joyY <= 2800) {
+                    joyMoved = false;
+                }
+
+                for (int i = 0; i < 5; i++) g2048_lastBtn[i] = data.btnDown[i];
                 
                 // Překreslí se POUZE když si hra vyžádá překreslení (tzn. změnil se stav)
                 if (g2048.pohyb) {
@@ -884,6 +946,16 @@ void Task_Display_UI(void *pvParameters) {
                 static int lastUltMm   = -999;
                 static int lastLaserMm = -999;
                 static int lastIrMm    = -999;
+
+                // Obsluha tlačítek pro přepínání aktivního senzoru a LED:
+                // Tlačítko 2 (Left) -> ULT, Tlačítko 3 (Center / On) -> Laser, Tlačítko 4 (Right) -> IR
+                if (data.btnDown[1]) {
+                    globalState.updateLeds(true, false, false);
+                } else if (data.btnDown[2]) {
+                    globalState.updateLeds(false, false, true);
+                } else if (data.btnDown[3]) {
+                    globalState.updateLeds(false, true, false);
+                }
 
                 static bool last_led_ult   = false;
                 static bool last_led_laser = false;
@@ -1065,15 +1137,16 @@ void Task_Display_UI(void *pvParameters) {
             // =======================================================
             case MODE_WIFI_SPOJENI: {
                 delay = 100; // 10 fps
-                uint8_t stations = WiFi.softAPgetStationNum();
+                SensorData data = globalState.getSensorData();
+                uint8_t stations = data.wifiStationsCount;
+                float estDist = data.wifiDistanceM;
                 static uint8_t lastStations = 255;
-
-                // Odhadovaná vzdálenost (např. 2-8 m nebo --- při nepřipojení)
-                float estDist = (stations > 0) ? 3.0f : 0.0f;
+                static int lastDistInt = -999;
 
                 // A) STATICKÁ MASKA (Vykreslí se pouze 1x při vstupu do módu)
                 if (needsFullRedraw) {
                     lastStations = 255;
+                    lastDistInt = -999;
 
                     // 1. Levý panel (béžovo-oranžový 0xFED7, 0..105 px)
                     gfx.fillRect(0, 0, 106, 240, 0xFED7);
@@ -1096,9 +1169,11 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.drawQRCode(126, 33, 6);
                 }
 
-                // B) DYNAMICKÁ ČÁST (Pouze při změně počtu připojených zařízení)
-                if (needsFullRedraw || stations != lastStations) {
+                // B) DYNAMICKÁ ČÁST (Reálná data ze SystemState)
+                int distInt = (int)(estDist * 10.0f);
+                if (needsFullRedraw || stations != lastStations || distInt != lastDistInt) {
                     lastStations = stations;
+                    lastDistInt = distInt;
 
                     uint16_t wifiColor = (stations > 0) ? 0x07E0 : 0xF800; // Zelená při připojení, červená při 0
 
@@ -1112,14 +1187,168 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.fillRect(20, 124, 66, 22, 0xFED7);
                     gfx.drawTextPartial(53 - wCount / 2, 126, sCount, wifiColor, 0xFED7, 2);
 
-                    // 3. Odhadovaná vzdálenost
-                    String sDist = (stations > 0) ? (String((int)estDist) + "m") : "---";
+                    // 3. Reálná vzdálenost z RSSI
+                    String sDist = (stations > 0 && estDist > 0.1f) ? (String(estDist, 1) + "m") : "---";
                     int wDist = sDist.length() * 12;
-                    gfx.fillRect(10, 184, 86, 22, 0xFED7);
+                    gfx.fillRect(6, 184, 94, 22, 0xFED7);
                     gfx.drawTextPartial(53 - wDist / 2, 186, sDist, ST77XX_BLACK, 0xFED7, 2);
 
                     // Obnova oddělovací linky
                     gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
+                }
+                break;
+            }
+
+            // =======================================================
+            // MÓD: WI-FI CSI RADAR & DETEKCE POHYBU (Návrh Wi-Fi 2)
+            // =======================================================
+            case MODE_WIFI_DETECTION: {
+                delay = 50; // 20 fps
+                SensorData data = globalState.getSensorData();
+
+                static float histCsi[60]; // 60 vzorků (1 vzorek za sekundu = 1 minuta historie)
+                static unsigned long lastCsiSampleTime = 0;
+                static bool csiGraphInit = false;
+                static int lastStateBox = -1; // 0 = kalibrace, 1 = klid, 2 = pohyb, 3 = odpojeno
+                static bool lastHasClient = false;
+
+                bool hasClient = (data.wifiStationsCount > 0);
+
+                // A) STATICKÁ MASKA
+                if (needsFullRedraw || hasClient != lastHasClient) {
+                    lastHasClient = hasClient;
+                    lastStateBox = -1;
+                    if (!csiGraphInit) {
+                        for (int i = 0; i < 60; i++) histCsi[i] = 1.0f;
+                        csiGraphInit = true;
+                    }
+
+                    // 1. Bílé pozadí
+                    gfx.fillRect(0, 0, 320, 240, ST77XX_WHITE);
+
+                    // 2. Levá horní část: Titulek
+                    gfx.drawTextPartial(16, 38, "WIFI -->", ST77XX_BLACK, ST77XX_WHITE, 2);
+                    gfx.drawTextPartial(16, 62, "Detection", ST77XX_BLACK, ST77XX_WHITE, 2);
+
+                    // 3. Rámečky a dělící linky
+                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                    gfx.drawLine(140, 0, 140, 120, ST77XX_BLACK);
+                    gfx.drawLine(0, 120, 319, 120, ST77XX_BLACK);
+
+                    // Pokud NENÍ připojen žádný mobil, zobrazíme velkou informativní obrazovku
+                    if (!hasClient) {
+                        gfx.fillRect(1, 121, 318, 118, 0xF7BE); // Jemné šedobílé pozadí
+                        gfx.drawTextPartial(22, 145, "CEKAM NA PRIPOJENI...", 0xF800, 0xF7BE, 2);
+                        gfx.drawTextPartial(18, 178, "CSI radar potrebuje telefon pro odraz vln.", ST77XX_BLACK, 0xF7BE, 1);
+                        gfx.drawTextPartial(18, 198, "1. Pripoj se k Wi-Fi: ESP-Demo-Box", 0x001F, 0xF7BE, 1);
+                        gfx.drawTextPartial(18, 216, "2. Nebo naskenuj QR kod v modu Wi-Fi QR.", ST77XX_DARKGREY, 0xF7BE, 1);
+                        gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                        gfx.drawLine(0, 120, 319, 120, ST77XX_BLACK);
+                    }
+                }
+
+                // B) DYNAMICKÁ ČÁST 1 - HORNÍ VÝSTRAŽNÝ / STAVOVÝ BOX (Vpravo nahoře)
+                int currentStateBox;
+                if (!hasClient) {
+                    currentStateBox = 3; // ODPOJENO
+                } else if (data.wifiCsiCalibrating) {
+                    currentStateBox = 0; // KALIBRACE
+                } else if (data.wifiMotionDetected) {
+                    currentStateBox = 2; // POHYB
+                } else {
+                    currentStateBox = 1; // KLID
+                }
+
+                if (needsFullRedraw || currentStateBox != lastStateBox) {
+                    lastStateBox = currentStateBox;
+
+                    if (currentStateBox == 3) { // ODPOJENO (Žádný mobil)
+                        gfx.fillRect(141, 1, 178, 118, 0xFED7); // Světle oranžová
+                        gfx.drawTextPartial(158, 38, "ZADNY MOBIL", 0xF800, 0xFED7, 2);
+                        gfx.drawTextPartial(170, 68, "Odpojeno", ST77XX_BLACK, 0xFED7, 2);
+                    } else if (currentStateBox == 0) { // KALIBRACE
+                        gfx.fillRect(141, 1, 178, 118, 0xFED7); // Světle oranžová/žlutá
+                        gfx.drawTextPartial(168, 38, "KALIBRACE...", ST77XX_BLACK, 0xFED7, 2);
+                        String sLeft = "Zbyva: " + String(data.wifiCsiCalibSecLeft) + "s";
+                        gfx.drawTextPartial(180, 68, sLeft, ST77XX_BLACK, 0xFED7, 2);
+                    } else if (currentStateBox == 2) { // POHYB DETEKOVÁN! (Červený box + ! ! !)
+                        gfx.fillRect(141, 1, 178, 118, 0xFCD3); // Lososová/růžovo-červená
+                        gfx.drawTextPartial(175, 42, "!  !  !", 0xF800, 0xFCD3, 4); // Velké červené vykřičníky
+                    } else { // KLID / OK
+                        gfx.fillRect(141, 1, 178, 118, 0xCE79); // Světle zelená
+                        gfx.drawTextPartial(180, 50, "[ KLID ]", 0x03E0, 0xCE79, 3);
+                    }
+                    gfx.drawLine(140, 0, 140, 120, ST77XX_BLACK);
+                    gfx.drawLine(0, 120, 319, 120, ST77XX_BLACK);
+                }
+
+                // C) DYNAMICKÁ ČÁST 2 - 60SEKUNDOVÝ DVOJBAREVNÝ GRAF (Prahová detekce - pouze při připojeném telefonu)
+                if (hasClient) {
+                    unsigned long now = millis();
+                    if (needsFullRedraw || (now - lastCsiSampleTime >= 1000)) { // 1 vzorek za sekundu = 60s graf
+                        lastCsiSampleTime = now;
+
+                        // Posun historie
+                        for (int i = 0; i < 59; i++) {
+                            histCsi[i] = histCsi[i + 1];
+                        }
+                        histCsi[59] = data.wifiMotionMetric;
+
+                        float thresh = (data.wifiThreshold > 0.5f) ? data.wifiThreshold : 2.5f;
+                        int yThresh = 236 - (int)(constrain(thresh, 0.0f, 8.0f) * 11.0f);
+                        yThresh = constrain(yThresh, 128, 234);
+
+                        int xBase = 2;
+                        int totalW = 316;
+
+                        for (int i = 0; i < 59; i++) {
+                            int x1 = xBase + (i * totalW) / 59;
+                            int x2 = xBase + ((i + 1) * totalW) / 59;
+
+                            int y1 = 236 - (int)(constrain(histCsi[i], 0.0f, 8.0f) * 11.0f);
+                            int y2 = 236 - (int)(constrain(histCsi[i + 1], 0.0f, 8.0f) * 11.0f);
+                            y1 = constrain(y1, 126, 236);
+                            y2 = constrain(y2, 126, 236);
+
+                            for (int px = x1; px <= x2; px++) {
+                                int py = y1 + (y2 - y1) * (px - x1) / (x2 - x1);
+                                py = constrain(py, 126, 236);
+
+                                // 1. Bílé pozadí nad křivkou
+                                if (py > 122) {
+                                    gfx.drawLine(px, 122, px, py - 1, ST77XX_WHITE);
+                                }
+                                // 2. Tmavá křivka
+                                gfx.drawLine(px, py, px, min(py + 1, 236), ST77XX_BLACK);
+
+                                // 3. Výplň pod křivkou:
+                                // Nad prahem (py < yThresh) -> Červená výplň (POHYB)
+                                // Pod prahem (py >= yThresh) -> Zelená výplň (KLID)
+                                if (py + 2 <= yThresh) {
+                                    gfx.drawLine(px, py + 2, px, yThresh, 0xFCD3); // Červená horní zóna poplachu
+                                    if (yThresh + 1 <= 237) {
+                                        gfx.drawLine(px, yThresh + 1, px, 237, 0xCE79); // Zelená spodní klidová zóna
+                                    }
+                                } else if (py + 2 <= 237) {
+                                    gfx.drawLine(px, py + 2, px, 237, 0xCE79); // Zelená klidová zóna
+                                }
+                            }
+                        }
+
+                        // Prahová horizontální čára přes graf
+                        for (int px = 4; px < 316; px += 4) {
+                            gfx.drawLine(px, yThresh, px + 2, yThresh, 0x7BEF); // Šedá čárkovaná linie prahu
+                        }
+
+                        // Časové značky 60s, 30s, 0s
+                        gfx.drawTextPartial(6, 227, "60s", ST77XX_BLACK, 0xCE79, 1);
+                        gfx.drawTextPartial(150, 227, "30s", ST77XX_BLACK, 0xCE79, 1);
+                        gfx.drawTextPartial(296, 227, "0s", ST77XX_BLACK, 0xCE79, 1);
+
+                        // Obnova oddělovacích linek
+                        gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                        gfx.drawLine(0, 120, 319, 120, ST77XX_BLACK);
+                    }
                 }
                 break;
             }
@@ -1151,13 +1380,30 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 unsigned long aktualniCas = millis();
                 delay = 10;
+                SensorData data = globalState.getSensorData();
+                static bool snake_lastBtn[5] = {false, false, false, false, false};
 
-                if(snake.isGameOver()){
-                    // sem dat ze kdyz stisknuto nejaky tlacitko tak nova hra---if()
-                    // snake.reset();
+                // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek)
+                if (data.btnDown[0] && !snake_lastBtn[0]) snake.goUp();
+                if (data.btnDown[4] && !snake_lastBtn[4]) snake.goDown();
+                if (data.btnDown[1] && !snake_lastBtn[1]) snake.goLeft();
+                if (data.btnDown[3] && !snake_lastBtn[3]) snake.goRight();
+
+                // Ovládání joystickem
+                if (data.joyY > 2800) snake.goUp();
+                else if (data.joyY < 1200) snake.goDown();
+                if (data.joyX < 1200) snake.goLeft();
+                else if (data.joyX > 2800) snake.goRight();
+
+                // Restart hry po Game Over stiskem středového tlačítka nebo joysticku
+                if ((data.btnDown[2] && !snake_lastBtn[2]) || data.joyBtn) {
+                    if (snake.isGameOver()) {
+                        snake.reset();
+                    }
                 }
+                for (int i = 0; i < 5; i++) snake_lastBtn[i] = data.btnDown[i];
 
-                if(aktualniCas - casPoslednihoKroku >= 150){
+                if (aktualniCas - casPoslednihoKroku >= 150) {
                     casPoslednihoKroku = aktualniCas;
                     snake.update();
                     snake.draw();
@@ -1172,12 +1418,21 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 unsigned long aktualniCasFlappy = millis();
                 delay = 10;
-                if(flappy.getGameOver()){
-                    // sem dat ze kdyz stisknuto nejaky tlacitko tak nova hra---if()
-                    // flappy.reset();
-                }
+                SensorData data = globalState.getSensorData();
+                static bool flappy_lastBtn = false;
 
-                if(aktualniCasFlappy - casPoslednihoKroku >= 40){
+                // Skok nebo restart hry při stisku kteréhokoliv akčního tlačítka
+                bool jumpPress = (data.btnDown[0] || data.btnDown[2] || data.btnDown[4] || data.joyBtn || data.btnTop);
+                if (jumpPress && !flappy_lastBtn) {
+                    if (flappy.getGameOver()) {
+                        flappy.reset();
+                    } else {
+                        flappy.jump();
+                    }
+                }
+                flappy_lastBtn = jumpPress;
+
+                if (aktualniCasFlappy - casPoslednihoKroku >= 40) {
                     casPoslednihoKroku = aktualniCasFlappy;
                     flappy.update();
                     flappy.draw();
