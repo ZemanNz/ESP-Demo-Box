@@ -10,7 +10,7 @@
 // ---------------------------------------------------------
 enum AppMode {
     MODE_MAIN_MENU,
-    MODE_SENSORS,
+    MODE_GYRO,
     MODE_GAME_SNAKE,
     MODE_GAME_FLAPPY,
     MODE_2048,
@@ -31,9 +31,9 @@ struct SensorData {
     float humidity;
 
     // --- 3x Jednoduché LED diody (Stav zapnuto / vypnuto) ---
-    bool led1;
-    bool led2;
-    bool led3;
+    bool led_ult;
+    bool led_ir;
+    bool led_laser;
 
     // --- Vzdálenostní senzory ---
     float irDistanceCm;          // Infračervený senzor vzdálenosti
@@ -479,9 +479,9 @@ public:
     // 3x LED diody na horním panelu
     void updateLeds(bool l1, bool l2, bool l3) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
-            sensors.led1 = l1;
-            sensors.led2 = l2;
-            sensors.led3 = l3;
+            sensors.led_ult = l1;
+            sensors.led_ir = l2;
+            sensors.led_laser = l3;
             xSemaphoreGive(stateMutex);
         }
     }

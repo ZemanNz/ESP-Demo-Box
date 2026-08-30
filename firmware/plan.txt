@@ -7,17 +7,55 @@
 
 
 MODE_MAIN_MENU
-- barevnej -> led horni pasek
-- dolni pasek odkres k dolnimu hybani
-- podle tlacitek prepinani meridel k sedmisegmentovce... + indikacni led
-- na 1602 teplota + vlhkost + fotorezisty
-- gyroskop na h display
-- h display... gyro, barevnej, prekazka, hodnoty ze spodniho
-- potenciometrem se posouva normalni servo
-- switche pro motor a ch servo --> taky na h display nebo na maly, nebo na aly neco s tim potakem procenta
-- joystick pro rizeni kontinualneho serva
-- na display mit wifi pripojeno / ne
-- muzu delat nejak kombinace... kratke/ dlouhe stisknuti....
+- barevnej -> led horni pasek (horní panel nastavuje barvu pásku podle RGB senzoru)
+- dolni pasek -> reakce na pohyb (joystick / VU-metr podle potenciometru)
+- podle spodních tlačítek -> přepínání měřidel k sedmisegmentovce (ULT / IR / Laser) + indikační stavové LED
+- na I2C LCD 1602 -> teplota + vlhkost z DHT senzoru
+- horní TFT displej -> živý přehled: gyroskop, barva, měřidla, Wi-Fi stav, stav spodních prvků
+- potenciometrem se plynule natáčí klasické servo (0° až 180°)
+- Switch 1 (přepínač 1) -> HW povolení / spuštění motoru (rychlost dle potenciometru nebo fixní)
+- Switch 2 (přepínač 2) -> HW povolení / autonomní cyklování chytrého serva LX-16A
+- joystick (osa Y) -> přímé řízení rychlosti a směru kontinuálního serva (-100 % až +100 %)
+- dolní OLED displej -> vypisuje aktuální výkon motoru a úhly serv
+- Wi-Fi indikátor -> na displeji zelená (klient připojen) / červená (nikdo nepřipojen)
+
+
+=============================================================================
+ARCHITEKTURA AUTONOMIE, SYSTEMSTATE A WI-FI
+=============================================================================
+1. PRINCIP ŘÍZENÍ (Horní panel jako Koordinátor / Master):
+   - Horní panel má centrální SystemState, přijímá vstupy ze spodního panelu po UARTu a zároveň obsluhuje WebServer (Wi-Fi).
+   - Vlákno Task_Sensors / Koordinační logika na horním panelu vyhodnocuje stavy a nastavuje cílové hodnoty pro akční členy.
+   - Tyto cíle se po UARTu v paketu TopToBottomPacket posílají dolnímu panelu, který je fyzicky vykoná (applyOutputsFromState).
+
+2. HIERARCHIE A PŘEPÍNÁNÍ REŽIMŮ (Prioritní systém):
+   A) PRIORITA 1 (Nejvyšší) - Web / Wi-Fi Override:
+      - Pokud uživatel na telefonu v prohlížeči hýbe posuvníkem serva, motoru nebo klikne na tlačítko:
+        -> WebManager zapíše hodnotu do SystemState a nastaví příznak overrideAutonomy = true.
+        -> Fyzické vstupy (potenciometr / joystick) jsou dočasně ignorovány a servo/motor poslouchá telefon.
+      - Jakmile uživatel na webu akci ukončí (nebo se odpojí), systém se vrátí do lokální autonomie.
+
+   B) PRIORITA 2 - Lokální autonomie podle přepínačů a ovladačů (při overrideAutonomy == false):
+      - Switch 1 == ON  -> Motor se točí rychlostí danou potenciometrem (nebo 100 %).
+      - Switch 1 == OFF -> Motor stojí (0 PWM).
+      - Switch 2 == ON  -> Chytré servo (LX-16A) autonomně kmitá / natáčí se podle rotačního enkodéru.
+      - Switch 2 == OFF -> Chytré servo drží výchozí středovou polohu (120°).
+      - Potenciometr    -> Plynule ovládá úhel klasického serva (map(pot, 0, 4095, 0, 180)).
+      - Joystick Y      -> Plynule ovládá spojité servo (map(joyY, 0, 4095, -100, 100)).
+      - 5x Tlačítka     -> Volí aktivní senzor pro 7-segmentový displej.
+
+3. TOK DAT V SYSTÉMU:
+   [Spodní vstupy: Pot, Joy, Switche, Tlačítka] 
+         | (BottomToTopPacket přes UART)
+         v
+   [Horní panel: SystemState] <----> [Webové rozhraní / Wi-Fi WebSocket]
+         |
+         | (Vyhodnocení autonomie / Web override)
+         v
+   [Horní panel: Cílové hodnoty motorů a serv]
+         | (TopToBottomPacket přes UART)
+         v
+   [Spodní panel: Fyzické buzení serv, motoru, LED pásku a OLED]
 
 
 

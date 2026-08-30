@@ -91,24 +91,39 @@ void Task_UART_Simulator(void *pvParameters) {
             bool b3 = (random(0, 2) == 1);
             bool b4 = (random(0, 2) == 1);
             globalState.updateDownButtons(b0, b1, b2, b3, b4);
+
+            float sim_ultrasonic = (float)random(100, 2000) / 10.0f; // 10.0 až 200.0 cm (100 až 2000 mm)
+            float sim_ir         = (float)random(30, 300) / 10.0f;   // 3.0 až 30.0 cm (30 až 300 mm)
+            uint16_t sim_laser   = (uint16_t)random(80, 1300);       // 80 až 1300 mm
+
+            globalState.updateUltrasonicDistance(sim_ultrasonic);
+            globalState.updateIRDistance(sim_ir);
+            globalState.updateLaserDistance(sim_laser);
+
+            int p = random(0, 3);
+            globalState.updateLeds(p == 0, p == 1, p == 2);
         }
 
         // ---------------------------------------------------------
-        // 2. PŘEPÍNÁNÍ POUZE MEZI 3 MÓDY PO 10 SEKUNDÁCH (10 000 ms)
+        // 2. PŘEPÍNÁNÍ POUZE MEZI 4 MÓDY PO 10 SEKUNDÁCH (10 000 ms)
         // ---------------------------------------------------------
         if (timeInMode >= 10000) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
             
             if (current == MODE_MAIN_MENU) {
-                nextMode = MODE_SENSORS; // GYROSKOP
-            } else if (current == MODE_SENSORS) {
+                nextMode = MODE_GYRO; // GYROSKOP
+            } else if (current == MODE_GYRO) {
                 nextMode = MODE_BAREVNY; // BAREVNÝ SENZOR
+            } else if (current == MODE_BAREVNY) {
+                nextMode = MODE_VZDALENOST; // VZDÁLENOST
+            } else if (current == MODE_VZDALENOST) {
+                nextMode = MODE_WIFI_SPOJENI; // WIFI SPOJENÍ & QR KÓD
             } else {
                 nextMode = MODE_MAIN_MENU; // Zpět do HLAVNÍHO MENU
             }
 
-            Serial.printf("[DEMO 3-MODY] Prepinam na mod: %d\n", (int)nextMode);
+            Serial.printf("[DEMO 5-MODU] Prepinam na mod: %d\n", (int)nextMode);
             globalState.setMode(nextMode);
         }
     }
@@ -234,8 +249,8 @@ void Task_Sensors(void *pvParameters) {
         // Kontrola otočení rotačního enkodéru pro změnu módu
         globalState.checkModeChange();
 
-        /* --- MĚŘENÍ SENZORŮ ZAKOMENTOVÁNO PRO REŽIM SIMULÁTORU ---
         switch (currentMode) {
+
             case MODE_SLEEP: {
                 vTaskDelay(pdMS_TO_TICKS(100));
                 break;
@@ -249,10 +264,46 @@ void Task_Sensors(void *pvParameters) {
                 sensorManager.readPhotoresistors();
                 sensorManager.readTopButton();
                 sensorManager.readColorSensor();
+
+                SensorData data = globalState.getSensorData();
+
+                //teplo a vlhkost na 1602
+                sensorManager.writeLCD1602("Temp: " + String(data.temperature, 1) + "C", 
+                                 "Hum: " + String(data.humidity, 1) + "%");
+
+                if(data.led_ult){
+                    sensorManager.set7Segment(data.ultrasonicDistanceCm);
+                    sensorManager.setLeds(true, false, false);
+                }else if(data.led_ir){
+                    sensorManager.set7Segment(data.irDistanceCm);
+                    sensorManager.setLeds(false, true, false);
+                }else if(data.led_laser){
+                    sensorManager.set7Segment(data.laserDistanceMm);
+                    sensorManager.setLeds(false, false, true);
+                }else{
+                    sensorManager.set7Segment(-1); // Zhasneme 7-segmentový displej
+                    sensorManager.setLeds(false, false, false);
+                }
+
+                //horni led pasek podle barevnyho
+
+                sensorManager.setLedStripColor(
+                    (data.colorR << 16) | (data.colorG << 8) | data.colorB, 
+                    data.ledStripTopBrightness
+                );
+
+                
+
+
+
+
+
+
+
                 break;
             }
 
-            case MODE_SENSORS:
+            case MODE_GYRO:
             case MODE_GAME_SNAKE:
             case MODE_GAME_FLAPPY:
             case MODE_2048:
@@ -265,7 +316,6 @@ void Task_Sensors(void *pvParameters) {
                 break;
             }
         }
-        ------------------------------------------------------------- */
 
         vTaskDelay(pdMS_TO_TICKS(50)); // Prodleva v simulátoru
     }
@@ -629,7 +679,7 @@ void Task_Display_UI(void *pvParameters) {
             // =======================================================
             // MÓD: GYROSKOP / IMU 3D OSY (Návrh 2)
             // =======================================================
-            case MODE_SENSORS: {
+            case MODE_GYRO: {
                 delay = 50; // 20 fps
                 SensorData data = globalState.getSensorData();
                 static float lastAngleX = -999.0f;
@@ -821,21 +871,255 @@ void Task_Display_UI(void *pvParameters) {
             }
 
             // =======================================================
+            // MÓD: VZDÁLENOSTNÍ SENZORY A GRAFY (ULT, Laser, IR)
+            // =======================================================
             case MODE_VZDALENOST: {
-                delay = 50;
+                delay = 50; // 20 fps
+                SensorData data = globalState.getSensorData();
+                
+                int ultMm   = (int)(data.ultrasonicDistanceCm * 10.0f);
+                int laserMm = (int)data.laserDistanceMm;
+                int irMm    = (int)(data.irDistanceCm * 10.0f);
+
+                static int lastUltMm   = -999;
+                static int lastLaserMm = -999;
+                static int lastIrMm    = -999;
+
+                static bool last_led_ult   = false;
+                static bool last_led_laser = false;
+                static bool last_led_ir    = false;
+
+                // Historie hodnot pro 5sekundové grafy (25 vzorků po 200 ms = 5.0 s)
+                static int histUlt[25]   = {0};
+                static int histLaser[25] = {0};
+                static int histIr[25]    = {0};
+                static unsigned long lastGraphSampleTime = 0;
+                static bool graphInitialized = false;
+
+                // A) STATICKÁ MASKA
                 if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(70, 100, "VZDALENOST", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    lastUltMm   = -999;
+                    lastLaserMm = -999;
+                    lastIrMm    = -999;
+
+                    if (!graphInitialized) {
+                        for (int i = 0; i < 25; i++) {
+                            histUlt[i]   = constrain(ultMm, 0, 2000);
+                            histLaser[i] = constrain(laserMm, 0, 1300);
+                            histIr[i]    = constrain(irMm, 0, 300);
+                        }
+                        graphInitialized = true;
+                    }
+
+                    // 1. Bílé pozadí celého displeje
+                    gfx.fillRect(0, 0, 320, 240, ST77XX_WHITE);
+                    
+                    // 2. Vycentrované nadpisy sloupců (Velikost 2)
+                    gfx.drawTextPartial(35, 14, "ULT", ST77XX_BLACK, ST77XX_WHITE, 2);
+                    gfx.drawTextPartial(130, 14, "Laser", ST77XX_BLACK, ST77XX_WHITE, 2);
+                    gfx.drawTextPartial(254, 14, "IR", ST77XX_BLACK, ST77XX_WHITE, 2);
+
+                    // 3. Větší ovládací tlačítka (Šedá kolečka R=17) - vycentrované ve spodní části horního panelu
+                    // Col 1: Left (CX=32, CY=102)
+                    gfx.fillCircle(32, 102, 17, 0xCE79);
+                    gfx.drawCircle(32, 102, 17, ST77XX_BLACK);
+                    gfx.drawTextPartial(20, 98, "Left", ST77XX_BLACK, 0xCE79, 1);
+
+                    // Col 2: On (CX=139, CY=102)
+                    gfx.fillCircle(139, 102, 17, 0xCE79);
+                    gfx.drawCircle(139, 102, 17, ST77XX_BLACK);
+                    gfx.drawTextPartial(133, 98, "On", ST77XX_BLACK, 0xCE79, 1);
+
+                    // Col 3: Right (CX=245, CY=102)
+                    gfx.fillCircle(245, 102, 17, 0xCE79);
+                    gfx.drawCircle(245, 102, 17, ST77XX_BLACK);
+                    gfx.drawTextPartial(230, 98, "Right", ST77XX_BLACK, 0xCE79, 1);
+
+                    // 4. Předělové linky (Vodorovná čára posunutá dolů na Y=140 pro větší horní prostor)
+                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
+                    gfx.drawLine(213, 0, 213, 239, ST77XX_BLACK);
+                    gfx.drawLine(0, 140, 319, 140, ST77XX_BLACK);
+                }
+
+                // B) DYNAMICKÁ ČÁST - ČÍSLA (Vycentrováno)
+                if (needsFullRedraw || abs(ultMm - lastUltMm) >= 3 || abs(laserMm - lastLaserMm) >= 3 || abs(irMm - lastIrMm) >= 3) {
+                    lastUltMm   = ultMm;
+                    lastLaserMm = laserMm;
+                    lastIrMm    = irMm;
+
+                    // Sloupec 1 (ULT mm)
+                    String sUlt = String(ultMm) + " mm";
+                    int wUlt = sUlt.length() * 12;
+                    gfx.fillRect(8, 45, 90, 22, ST77XX_WHITE);
+                    gfx.drawTextPartial(53 - wUlt / 2, 48, sUlt, ST77XX_BLACK, ST77XX_WHITE, 2);
+
+                    // Sloupec 2 (Laser mm)
+                    String sLaser = String(laserMm) + " mm";
+                    int wLaser = sLaser.length() * 12;
+                    gfx.fillRect(115, 45, 90, 22, ST77XX_WHITE);
+                    gfx.drawTextPartial(160 - wLaser / 2, 48, sLaser, ST77XX_BLACK, ST77XX_WHITE, 2);
+
+                    // Sloupec 3 (IR mm)
+                    String sIr = String(irMm) + " mm";
+                    int wIr = sIr.length() * 12;
+                    gfx.fillRect(222, 45, 90, 22, ST77XX_WHITE);
+                    gfx.drawTextPartial(266 - wIr / 2, 48, sIr, ST77XX_BLACK, ST77XX_WHITE, 2);
+                }
+
+                // C) DYNAMICKÁ ČÁST - INDIKAČNÍ LED KOLEČKA (Zvětšená R=13, Zelená = aktivní / Červená = neaktivní)
+                if (needsFullRedraw || last_led_ult != data.led_ult || last_led_laser != data.led_laser || last_led_ir != data.led_ir) {
+                    last_led_ult   = data.led_ult;
+                    last_led_laser = data.led_laser;
+                    last_led_ir    = data.led_ir;
+
+                    // Col 1: ULT LED (CX=76, CY=102)
+                    gfx.fillCircle(76, 102, 13, data.led_ult ? 0x07E0 : 0xF800);
+                    gfx.drawCircle(76, 102, 13, ST77XX_BLACK);
+
+                    // Col 2: Laser LED (CX=183, CY=102)
+                    gfx.fillCircle(183, 102, 13, data.led_laser ? 0x07E0 : 0xF800);
+                    gfx.drawCircle(183, 102, 13, ST77XX_BLACK);
+
+                    // Col 3: IR LED (CX=289, CY=102)
+                    gfx.fillCircle(289, 102, 13, data.led_ir ? 0x07E0 : 0xF800);
+                    gfx.drawCircle(289, 102, 13, ST77XX_BLACK);
+                }
+
+                // D) DYNAMICKÁ ČÁST - 5SEKUNDOVÉ KONTINUÁLNÍ GRAFY (100% BEZ PROBLIKÁVÁNÍ)
+                unsigned long now = millis();
+                if (needsFullRedraw || (now - lastGraphSampleTime >= 200)) {
+                    lastGraphSampleTime = now;
+
+                    // Posun vzorků v poli historie
+                    for (int i = 0; i < 24; i++) {
+                        histUlt[i]   = histUlt[i + 1];
+                        histLaser[i] = histLaser[i + 1];
+                        histIr[i]    = histIr[i + 1];
+                    }
+                    histUlt[24]   = constrain(ultMm, 0, 2000);   // Max 2.0 m (2000 mm)
+                    histLaser[24] = constrain(laserMm, 0, 1300); // Max 1.3 m (1300 mm)
+                    histIr[24]    = constrain(irMm, 0, 300);     // Max 30 cm (300 mm)
+
+                    // Vykreslení grafů (sloupec po sloupci) přímým jednoprůchodovým zápisem sloupců (Zero-flicker)
+                    for (int col = 0; col < 3; col++) {
+                        int xBase = (col == 0) ? 2 : ((col == 1) ? 108 : 215);
+                        int* hData = (col == 0) ? histUlt : ((col == 1) ? histLaser : histIr);
+                        int maxRange = (col == 0) ? 2000 : ((col == 1) ? 1300 : 300); // Specifický rozsah pro každý senzor
+                        uint16_t fillColor = (col == 0) ? 0x9E7F : ((col == 1) ? 0xFFB0 : 0xFD34); // Modrá / Žlutá / Červená výplň
+                        uint16_t lineColor = (col == 0) ? 0x01DF : ((col == 1) ? 0xD2A0 : 0xC800); // Tmavší křivka
+
+                        for (int i = 0; i < 24; i++) {
+                            int x1 = xBase + (i * 102) / 24;
+                            int x2 = xBase + ((i + 1) * 102) / 24;
+                            int y1 = 236 - map(hData[i], 0, maxRange, 0, 88);
+                            int y2 = 236 - map(hData[i + 1], 0, maxRange, 0, 88);
+                            y1 = constrain(y1, 148, 236);
+                            y2 = constrain(y2, 148, 236);
+
+                            for (int px = x1; px <= x2; px++) {
+                                int py = y1 + (y2 - y1) * (px - x1) / (x2 - x1);
+                                py = constrain(py, 148, 236);
+
+                                // 1. Bílé pozadí nad křivkou (okamžitý přepis beze zbytku a bez blikání)
+                                if (py > 142) {
+                                    gfx.drawLine(px, 142, px, py - 1, ST77XX_WHITE);
+                                }
+                                // 2. Tmavá křivka
+                                gfx.drawLine(px, py, px, min(py + 1, 236), lineColor);
+                                // 3. Barevná výplň pod křivkou
+                                if (py + 2 <= 237) {
+                                    gfx.drawLine(px, py + 2, px, 237, fillColor);
+                                }
+                            }
+                        }
+
+                        // Postranní orientační značky vzdálenosti uvnitř grafu odpovídající reálným rozsahům
+                        if (col == 0) {
+                            gfx.drawTextPartial(xBase + 3, 144, "2m", 0x7BEF, ST77XX_WHITE, 1);
+                            gfx.drawTextPartial(xBase + 3, 188, "1m", 0x7BEF, ST77XX_WHITE, 1);
+                        } else if (col == 1) {
+                            gfx.drawTextPartial(xBase + 3, 144, "1.3m", 0x7BEF, ST77XX_WHITE, 1);
+                            gfx.drawTextPartial(xBase + 3, 188, "0.6m", 0x7BEF, ST77XX_WHITE, 1);
+                        } else {
+                            gfx.drawTextPartial(xBase + 3, 144, "30cm", 0x7BEF, ST77XX_WHITE, 1);
+                            gfx.drawTextPartial(xBase + 3, 188, "15cm", 0x7BEF, ST77XX_WHITE, 1);
+                        }
+
+                        // Časové značky "0s" a "5s" přímo v grafu (šetří místo a neblikají)
+                        gfx.drawTextPartial(xBase + 4, 227, "0s", ST77XX_BLACK, fillColor, 1);
+                        gfx.drawTextPartial(xBase + 88, 227, "5s", ST77XX_BLACK, fillColor, 1);
+                    }
+
+                    // Obnova oddělovacích a ohraničujících linek
+                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
+                    gfx.drawLine(213, 0, 213, 239, ST77XX_BLACK);
+                    gfx.drawLine(0, 140, 319, 140, ST77XX_BLACK);
                 }
                 break;
             }
 
             // =======================================================
+            // MÓD: WI-FI PŘIPOJENÍ & QR KÓD (Návrh Wi-Fi 1)
+            // =======================================================
             case MODE_WIFI_SPOJENI: {
-                delay = 50;
+                delay = 100; // 10 fps
+                uint8_t stations = WiFi.softAPgetStationNum();
+                static uint8_t lastStations = 255;
+
+                // Odhadovaná vzdálenost (např. 2-8 m nebo --- při nepřipojení)
+                float estDist = (stations > 0) ? 3.0f : 0.0f;
+
+                // A) STATICKÁ MASKA (Vykreslí se pouze 1x při vstupu do módu)
                 if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(52, 100, "WIFI SPOJENI", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    lastStations = 255;
+
+                    // 1. Levý panel (béžovo-oranžový 0xFED7, 0..105 px)
+                    gfx.fillRect(0, 0, 106, 240, 0xFED7);
+
+                    // 2. Pravý panel (čistě bílý, 106..319 px)
+                    gfx.fillRect(106, 0, 214, 240, ST77XX_WHITE);
+
+                    // 3. Rámečky a svislá předělová linka
+                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
+                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
+
+                    // 4. Titulek "WIFI"
+                    gfx.drawTextPartial(29, 16, "WIFI", ST77XX_BLACK, 0xFED7, 2);
+
+                    // 5. Statické popisky
+                    gfx.drawTextPartial(26, 110, "zarizeni:", ST77XX_BLACK, 0xFED7, 1);
+                    gfx.drawTextPartial(16, 168, "VZDALENOST:", ST77XX_BLACK, 0xFED7, 1);
+
+                    // 6. QR kód vycentrovaný na pravém panelu (29x29 modulů, scale=6 -> 174x174 px)
+                    gfx.drawQRCode(126, 33, 6);
+                }
+
+                // B) DYNAMICKÁ ČÁST (Pouze při změně počtu připojených zařízení)
+                if (needsFullRedraw || stations != lastStations) {
+                    lastStations = stations;
+
+                    uint16_t wifiColor = (stations > 0) ? 0x07E0 : 0xF800; // Zelená při připojení, červená při 0
+
+                    // 1. Překreslení Wi-Fi ikony vlevo nahoře
+                    gfx.fillRect(20, 46, 66, 48, 0xFED7); // Vyčištění prostoru ikony
+                    gfx.drawWifiIcon(53, 65, wifiColor, 0xFED7);
+
+                    // 2. Počet připojených zařízení
+                    String sCount = String(stations);
+                    int wCount = sCount.length() * 12;
+                    gfx.fillRect(20, 124, 66, 22, 0xFED7);
+                    gfx.drawTextPartial(53 - wCount / 2, 126, sCount, wifiColor, 0xFED7, 2);
+
+                    // 3. Odhadovaná vzdálenost
+                    String sDist = (stations > 0) ? (String((int)estDist) + "m") : "---";
+                    int wDist = sDist.length() * 12;
+                    gfx.fillRect(10, 184, 86, 22, 0xFED7);
+                    gfx.drawTextPartial(53 - wDist / 2, 186, sDist, ST77XX_BLACK, 0xFED7, 2);
+
+                    // Obnova oddělovací linky
+                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
                 }
                 break;
             }

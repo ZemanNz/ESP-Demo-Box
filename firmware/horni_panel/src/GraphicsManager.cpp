@@ -211,6 +211,58 @@ void GraphicsManager::drawColorWheel(int cx, int cy, int radius) {
     tft.drawCircle(cx, cy, radius, ST77XX_BLACK);
 }
 
+// 29x29 QR kód pro okamžité Wi-Fi připojení: WIFI:S:ESP-Demo-Box;T:nopass;;
+static const uint32_t QR_CODE_DATA[29] PROGMEM = {
+    0x1FCEE77F, // Radek 0
+    0x1046F641, // Radek 1
+    0x1753AD5D, // Radek 2
+    0x15576355, // Radek 3
+    0x1759355D, // Radek 4
+    0x10520E41, // Radek 5
+    0x1FD5557F, // Radek 6
+    0x00145D00, // Radek 7
+    0x17C81B7C, // Radek 8
+    0x14B5E529, // Radek 9
+    0x0FD37A45, // Radek 10
+    0x0224ADC1, // Radek 11
+    0x0155693F, // Radek 12
+    0x1335372B, // Radek 13
+    0x075E08C4, // Radek 14
+    0x193054C8, // Radek 15
+    0x05721AD8, // Radek 16
+    0x1B2BE2AB, // Radek 17
+    0x13E77A1A, // Radek 18
+    0x1282A7B1, // Radek 19
+    0x12FA69F3, // Radek 20
+    0x00173318, // Radek 21
+    0x1FC20B58, // Radek 22
+    0x105A571F, // Radek 23
+    0x175315F4, // Radek 24
+    0x15596C46, // Radek 25
+    0x175CB812, // Radek 26
+    0x104A6F5B, // Radek 27
+    0x1FD923C2  // Radek 28
+};
+
+void GraphicsManager::drawQRCode(int startX, int startY, int moduleSize) {
+    int qrPixelSize = 29 * moduleSize;
+    int quietZone = 6;
+    
+    // Bílý podklad a černý obrys
+    tft.fillRect(startX - quietZone, startY - quietZone, qrPixelSize + 2 * quietZone, qrPixelSize + 2 * quietZone, ST77XX_WHITE);
+    tft.drawRect(startX - quietZone - 1, startY - quietZone - 1, qrPixelSize + 2 * quietZone + 2, qrPixelSize + 2 * quietZone + 2, ST77XX_BLACK);
+
+    // Vykreslení černých modulů
+    for (int r = 0; r < 29; r++) {
+        uint32_t rowData = pgm_read_dword(&QR_CODE_DATA[r]);
+        for (int c = 0; c < 29; c++) {
+            if ((rowData >> (28 - c)) & 0x01) {
+                tft.fillRect(startX + c * moduleSize, startY + r * moduleSize, moduleSize, moduleSize, ST77XX_BLACK);
+            }
+        }
+    }
+}
+
 GFXcanvas16* GraphicsManager::getCanvas() {
     if (canvas == nullptr) {
         Serial.println("[GFX] Alokuji 150KB Canvas do PSRAM pro Double Buffering...");

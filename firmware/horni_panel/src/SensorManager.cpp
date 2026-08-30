@@ -197,17 +197,17 @@ void SensorManager::setLeds(bool l1, bool l2, bool l3) {
 
 void SensorManager::setLed1(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(on, current.led2, current.led3);
+    setLeds(on, current.led_ir, current.led_laser);
 }
 
 void SensorManager::setLed2(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(current.led1, on, current.led3);
+    setLeds(current.led_ult, on, current.led_laser);
 }
 
 void SensorManager::setLed3(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(current.led1, current.led2, on);
+    setLeds(current.led_ult, current.led_ir, on);
 }
 
 // 8-LED WS2812B RGB pásek
@@ -294,6 +294,10 @@ void SensorManager::writeLCD1602(const char* line1, const char* line2) {
         lcd.print(line2);
     }
 #endif
+}
+
+void SensorManager::writeLCD1602(const String& line1, const String& line2) {
+    writeLCD1602(line1.c_str(), line2.length() > 0 ? line2.c_str() : nullptr);
 }
 
 void SensorManager::setLCDBacklight(bool on) {

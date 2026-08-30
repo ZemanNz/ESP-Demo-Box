@@ -54,6 +54,7 @@ public:
 
     // I2C LCD 1602 displej
     void writeLCD1602(const char* line1, const char* line2 = nullptr);
+    void writeLCD1602(const String& line1, const String& line2 = "");
     void setLCDBacklight(bool on);
 
     ///////////////////////

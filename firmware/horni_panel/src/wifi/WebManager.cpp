@@ -167,9 +167,9 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
         int id = doc["id"] | 1;                 // Číslo LED (1, 2 nebo 3)
         bool state = doc["state"] | false;      // true = zapnuto, false = vypnuto
         SensorData d = pState->getSensorData(); // Načteme aktuální stavy ostatních LED
-        if (id == 1) pState->updateLeds(state, d.led2, d.led3);
-        else if (id == 2) pState->updateLeds(d.led1, state, d.led3);
-        else if (id == 3) pState->updateLeds(d.led1, d.led2, state);
+        if (id == 1) pState->updateLeds(state, d.led_ir, d.led_laser);
+        else if (id == 2) pState->updateLeds(d.led_ult, state, d.led_laser);
+        else if (id == 3) pState->updateLeds(d.led_ult, d.led_ir, state);
     }
     // 3. Příkaz pro nastavení úhlu klasického serva (0 až 180 stupňů)
     else if (strcmp(cmd, "setServo") == 0) {
@@ -261,9 +261,9 @@ void WebManager::broadcastTelemetry() {
     }
 
     // 6. Stavy výstupů
-    doc["led1"] = d.led1;                      // Stav LED 1
-    doc["led2"] = d.led2;                      // Stav LED 2
-    doc["led3"] = d.led3;                      // Stav LED 3
+    doc["led1"] = d.led_ult;                   // Stav LED ULT (1)
+    doc["led2"] = d.led_ir;                    // Stav LED IR (2)
+    doc["led3"] = d.led_laser;                 // Stav LED Laser (3)
 
     // 7. Systémové informace
     doc["mode"] = (int)mode;                   // Aktuální číslo běžícího módu na displeji
