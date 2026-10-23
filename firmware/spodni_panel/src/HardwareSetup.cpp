@@ -114,15 +114,20 @@ bool setupServosAndMotors() {
 
     // Smart Servo LX-16A (Jednodrátový UART)
 #ifdef ENABLE_SMART_SERVO
-    pinMode((gpio_num_t)PIN_SMART_SERVO, INPUT_PULLUP);
-    servoBus.begin(2, UART_NUM_2, (gpio_num_t)PIN_SMART_SERVO);
+    servoBus.begin(1, UART_NUM_2, (gpio_num_t)PIN_SMART_SERVO);
+    delay(1000); // Nutná pauza 1s pro stabilizaci sběrnice přesně jako v funkčním příkladu
+
     Serial.printf("[SMART_SERVO] Testuji LX-16A na GPIO %d...\n", PIN_SMART_SERVO);
-    delay(500);
     uint8_t id = servoBus.getId();
     if (id == 255) {
-        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (nenapájeno nebo odpojeno). Pokračuji..."));
+        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (broadcast 254). Pokračuji..."));
     } else {
         Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
+        if (id != 0) {
+            Serial.printf("[SMART_SERVO] Menim ID serva z %d na 0...\n", id);
+            servoBus.setId(0);
+            delay(500);
+        }
     }
 #endif
 
