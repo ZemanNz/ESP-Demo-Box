@@ -45,6 +45,10 @@ struct BottomInputs {
     bool     switch1;
     bool     switch2;
 
+    // Koncové spínače lineárního posuvu
+    bool     limitMin;
+    bool     limitMax;
+
     // Reálný stav/zpětná vazba z akčních členů
     int16_t  currentSmartServoAngle;
     uint8_t  currentServoAngle;
@@ -171,6 +175,17 @@ public:
             if (inputs.switch1 != s1 || inputs.switch2 != s2) {
                 inputs.switch1 = s1;
                 inputs.switch2 = s2;
+                needsTx = true;
+            }
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void updateLimitSwitches(bool lMin, bool lMax) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            if (inputs.limitMin != lMin || inputs.limitMax != lMax) {
+                inputs.limitMin = lMin;
+                inputs.limitMax = lMax;
                 needsTx = true;
             }
             xSemaphoreGive(stateMutex);

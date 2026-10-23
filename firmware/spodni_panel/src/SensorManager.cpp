@@ -80,6 +80,14 @@ void SensorManager::readSwitches() {
 #endif
 }
 
+void SensorManager::readLimitSwitches() {
+#ifdef ENABLE_LIMIT_SWITCHES
+    bool minLimit = (digitalRead(PIN_LIMIT_MIN) == LOW);
+    bool maxLimit = (digitalRead(PIN_LIMIT_MAX) == LOW);
+    globalState.updateLimitSwitches(minLimit, maxLimit);
+#endif
+}
+
 void SensorManager::readEncoder() {
 #ifdef ENABLE_ENCODER
     int clkState = digitalRead(PIN_ENC_CLK);
@@ -118,6 +126,7 @@ void SensorManager::updateAllInputs() {
     readButtons();
     readSwitches();
     readEncoder();
+    readLimitSwitches();
 }
 
 // =============================================================================
@@ -146,11 +155,11 @@ void SensorManager::setServoCont(int8_t speed) {
 #endif
 }
 
-void SensorManager::setMotor(int16_t speed) {
 #ifdef ENABLE_MOTOR_CTRL
+void SensorManager::setMotor(int16_t speed) {
     analogWrite(PIN_MOTOR_CTRL, constrain(speed, 0, 255));
-#endif
 }
+#endif
 
 void SensorManager::setLedStrip(const uint32_t leds[8], uint8_t brightness) {
 #ifdef ENABLE_LED_STRIP
@@ -188,7 +197,9 @@ void SensorManager::applyOutputsFromState() {
     setSmartServo(out.targetSmartServoAngle);
     setServoClassic(out.targetServoAngle);
     setServoCont(out.targetContinuousServo);
+#ifdef ENABLE_MOTOR_CTRL
     setMotor(out.targetMotorSpeed);
+#endif
     setLedStrip(out.ledStrip, out.ledBrightness);
     updateOled(out.oledLine1, out.oledLine2);
 }

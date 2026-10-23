@@ -25,6 +25,7 @@ public:
     void readButtons();
     void readSwitches();
     void readEncoder();
+    void readLimitSwitches();
 
     // Přímé vyčtení reálného úhlu z chytrého serva LX-16A přes UART
     int16_t getSmartServoAngle();
@@ -38,7 +39,9 @@ public:
     void setSmartServo(int16_t angle);
     void setServoClassic(uint8_t angle);
     void setServoCont(int8_t speed);
+#ifdef ENABLE_MOTOR_CTRL
     void setMotor(int16_t speed);
+#endif
     void setLedStrip(const uint32_t leds[8], uint8_t brightness = 50);
     void updateOled(const char* line1, const char* line2 = nullptr);
 

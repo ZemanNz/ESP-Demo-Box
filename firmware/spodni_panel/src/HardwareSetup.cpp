@@ -105,11 +105,11 @@ bool setupServosAndMotors() {
     Serial.printf("[SERVO_CONT] OK – Pripojeno na GPIO %d\n", PIN_SERVO_CONT);
 #endif
 
-    // Řízení DC motoru (PWM)
-#ifdef ENABLE_MOTOR_CTRL
-    pinMode(PIN_MOTOR_CTRL, OUTPUT);
-    analogWrite(PIN_MOTOR_CTRL, 0);
-    Serial.printf("[MOTOR_CTRL] OK – Vystup motoru na GPIO %d\n", PIN_MOTOR_CTRL);
+    // Koncové spínače lineárního posuvu
+#ifdef ENABLE_LIMIT_SWITCHES
+    pinMode(PIN_LIMIT_MIN, INPUT_PULLUP);
+    pinMode(PIN_LIMIT_MAX, INPUT); // GPIO35 vyžaduje externí 10k rezistor k 3.3V
+    Serial.printf("[LIMIT_SWITCHES] OK – Min: GPIO %d, Max: GPIO %d\n", PIN_LIMIT_MIN, PIN_LIMIT_MAX);
 #endif
 
     // Smart Servo LX-16A (Jednodrátový UART)
@@ -120,11 +120,10 @@ bool setupServosAndMotors() {
     delay(500);
     uint8_t id = servoBus.getId();
     if (id == 255) {
-        lastHardwareError = "Smart Servo LX-16A neodpovida!";
-        Serial.println(F("[SMART_SERVO] CHYBA: LX-16A neodpovídá na ping!"));
-        return false;
+        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (nenapájeno nebo odpojeno). Pokračuji..."));
+    } else {
+        Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
     }
-    Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
 #endif
 
     return true;

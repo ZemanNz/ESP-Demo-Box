@@ -116,114 +116,66 @@ void Task_UART(void *pvParameters) {
 void Task_Sensors(void *pvParameters) {
     Serial.print("[TASK] Task_Sensors bezi na jadre: ");
     Serial.println(xPortGetCoreID());
-    byte delay = 20; // Perioda 20 ms (50 Hz)
+
+    unsigned long lastPrintTime = 0;
+    uint8_t ledHue = 0;
 
     for (;;) {
-        AppMode currentMode = globalState.getMode();
+        // 1. Přečteme veškeré vstupy (Joystick, Pot, Tlačítka, Switche, Enkodér, Dorazy)
+        sensorManager.updateAllInputs();
 
-        switch (currentMode) {
-        
-            case MODE_SLEEP: {
-                Serial.println("[SYSTEM] Dolni panel prechazi do Light Sleep...");
+        BottomInputs in = globalState.getInputs();
+        int16_t smartAngle = sensorManager.getSmartServoAngle();
 
-                // 1. Zhasneme OLED displej
-                sensorManager.updateOled("", "");
+        unsigned long now = millis();
 
-                // 2. Zhasneme LED pásek
-                uint32_t offLeds[8] = {0};
-                sensorManager.setLedStrip(offLeds, 0);
+        // 2. Periodický přehledný výpis do Serial Monitoru (každých 250 ms)
+        if (now - lastPrintTime >= 250) {
+            lastPrintTime = now;
 
-                // 3. Zastavíme motory
-                sensorManager.setMotor(0);
-                sensorManager.setServoCont(0);
+            Serial.printf("[TEST] POT: %4d | JOY: X=%4d Y=%4d SW=%d | BTN: [%d %d %d %d %d] | SW: [%d %d] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d | SMART: %3d deg\n",
+                          in.potentiometer,
+                          in.joyX, in.joyY, in.joyBtn ? 1 : 0,
+                          in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
+                          in.switch1 ? 1 : 0, in.switch2 ? 1 : 0,
+                          in.limitMin ? 1 : 0, in.limitMax ? 1 : 0,
+                          in.encoderPos,
+                          smartAngle);
 
-                // 4. Vyprázdníme sériové buffery před uspáním
-                Serial.flush();
-                #ifdef ENABLE_UART_TOP
-                    SerialTop.flush();
-                #endif
+            // 3. Živé zobrazení na OLED displeji
+            char line1[17];
+            char line2[17];
+            snprintf(line1, sizeof(line1), "P:%4d J:%d,%d", in.potentiometer, in.joyX / 100, in.joyY / 100);
+            snprintf(line2, sizeof(line2), "B:%d%d%d%d%d L:%d,%d",
+                     in.btnDown[0], in.btnDown[1], in.btnDown[2], in.btnDown[3], in.btnDown[4],
+                     in.limitMin, in.limitMax);
+            sensorManager.updateOled(line1, line2);
 
-                #ifdef ENABLE_BUTTONS
-                    gpio_wakeup_enable((gpio_num_t)PIN_BTN_1, GPIO_INTR_LOW_LEVEL);
-                    gpio_wakeup_enable((gpio_num_t)PIN_BTN_2, GPIO_INTR_LOW_LEVEL);
-                    gpio_wakeup_enable((gpio_num_t)PIN_BTN_3, GPIO_INTR_LOW_LEVEL);
-                    gpio_wakeup_enable((gpio_num_t)PIN_BTN_4, GPIO_INTR_LOW_LEVEL);
-                    gpio_wakeup_enable((gpio_num_t)PIN_BTN_5, GPIO_INTR_LOW_LEVEL);
-                #endif
-
-                #ifdef ENABLE_JOYSTICK
-                    gpio_wakeup_enable((gpio_num_t)PIN_JOY_SW, GPIO_INTR_LOW_LEVEL); // Stisk joysticku
-                #endif
-
-                #ifdef ENABLE_ENCODER
-                    gpio_wakeup_enable((gpio_num_t)PIN_ENC_CLK, GPIO_INTR_LOW_LEVEL); // Otočení enkodéru
-                    gpio_wakeup_enable((gpio_num_t)PIN_ENC_DT,  GPIO_INTR_LOW_LEVEL);
-                #endif
-
-                #ifdef ENABLE_SWITCHES
-                    // Přepnutí switchů do opačné polohy
-                    gpio_wakeup_enable((gpio_num_t)PIN_SWITCH_1, digitalRead(PIN_SWITCH_1) == HIGH ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
-                    gpio_wakeup_enable((gpio_num_t)PIN_SWITCH_2, digitalRead(PIN_SWITCH_2) == HIGH ? GPIO_INTR_LOW_LEVEL : GPIO_INTR_HIGH_LEVEL);
-                #endif
-
-                esp_sleep_enable_gpio_wakeup();
-
-                // 6. Nastavení probuzení po UARTu z horního panelu (UART1)
-                #ifdef ENABLE_UART_TOP
-                    esp_sleep_enable_uart_wakeup(1);
-                #endif
-
-                // 7. Samotný vstup do Light Sleep
-                esp_light_sleep_start();
-
-                // =====================================================
-                // PROBUZENÍ! (Kód pokračuje zde po probuzení)
-                // =====================================================
-    
-                esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
-                Serial.printf("[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d)\n", (int)duvod);
-
-                if (duvod != ESP_SLEEP_WAKEUP_UART) {
-                    Serial.println("-> Probuzeno na DOLNIM panelu -> Probouzim HORNI panel!");
-                    
-                    #ifdef ENABLE_UART_TOP
-                        // 1. Pošleme znak po UARTu, který okamžitě probudí horní panel
-                        SerialTop.println("WAKEUP");
-                    #endif
-
-                    // 2. Přečteme vstupy a zvedneme příznak odeslání
-                    sensorManager.updateAllInputs();
-                    
-                    // 3. Počkáme krátce (např. 150 ms), až horní panel odešle nový pracovní mód
-                    unsigned long startWait = millis();
-                    while (globalState.getMode() == MODE_SLEEP && millis() - startWait < 300) {
-                        vTaskDelay(pdMS_TO_TICKS(10));
-                    }
-                } 
-                else {
-                    Serial.println("-> Probuzeno z HORNIHO panelu (UART)");
-                    // Krátká prodleva na přečtení příchozího paketu v Task_UART
-                    vTaskDelay(pdMS_TO_TICKS(50));
+            // 4. Efekt plynulé změny barvy na LED pásku
+            uint32_t colors[8];
+            for (int i = 0; i < 8; i++) {
+                uint8_t hue = (ledHue + (i * 32)) & 255;
+                // Převod HSV/Hue na 24-bit RGB barvu
+                uint8_t region = hue / 43;
+                uint8_t remainder = (hue - (region * 43)) * 6;
+                uint8_t q = 255 - remainder;
+                uint8_t t = remainder;
+                uint8_t r = 0, g = 0, b = 0;
+                switch (region) {
+                    case 0: r = 255; g = t; b = 0; break;
+                    case 1: r = q; g = 255; b = 0; break;
+                    case 2: r = 0; g = 255; b = t; break;
+                    case 3: r = 0; g = q; b = 255; break;
+                    case 4: r = t; g = 0; b = 255; break;
+                    default: r = 255; g = 0; b = q; break;
                 }
-
-                break;
+                colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
             }
-
-            case MODE_MAIN_MENU:
-            case MODE_SENSORS:
-            case MODE_GAME_SNAKE:
-            case MODE_GAME_FLAPPY:
-            case MODE_2048:
-            case MODE_VZDALENOST:
-            case MODE_WIFI_SPOJENI:
-            case MODE_SERVA:
-            case MODE_MOTOR:
-            case MODE_BAREVNY: 
-                break;
-   
+            sensorManager.setLedStrip(colors, 40);
+            ledHue += 5;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(delay)); // Perioda 20 ms (50 Hz)
+
+        vTaskDelay(pdMS_TO_TICKS(20)); // Perioda čtení vstupů 20 ms (50 Hz)
     }
 }
 

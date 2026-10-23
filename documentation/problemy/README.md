@@ -16,6 +16,7 @@ Tato složka slouží jako přehledný registr technických problémů, na kter�
 | **08** | Architektura Master-Slave mezi dvěma mikrokontroléry ESP32 | Systémový návrh | [Zobrazit rozbor (Master-Slave ESP32)](07_architektura_master_slave_esp32.md) |
 | **09** | Úsporný režim Light Sleep a asynchronní probouzení (Wake-up) | Power Management / HW | [Zobrazit řešení (Light Sleep)](08_usporny_rezim_light_sleep_a_wake_up.md) |
 | **10** | Vkládání webu do Flash paměti (`PROGMEM`), HTTP Caching a trvalá paměť | Web / Síť / Paměť | [Zobrazit řešení (PROGMEM & HTTP Caching)](09_vkladani_webu_do_progmem_a_http_caching.md) |
+| **11** | Parazitní stahování napětí a trvalý reset při společném tlačítku EN (Schottkyho diody) | Hardware / Reset obvody | [Zobrazit řešení (Oddělení diodami 1N5819)](10_problemy_spojeneho_resetu.md) |
 
 ---
 *Všechny dokumenty obsahují detailní technické zdůvodnění, matematické a paměťové souvislosti a zdrojové kódy přímo použitelné do textové části maturitní práce.*
