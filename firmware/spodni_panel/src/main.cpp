@@ -128,9 +128,23 @@ void Task_Sensors(void *pvParameters) {
 
         // Řízení klasického 180° serva podle potenciometru:
         // Potenciometr 0 až 4200 namapován na úhel serva 0° až 180° (což odpovídá -90° až +90°)
-        int servoAngleDeg = map(constrain((int)in.potentiometer, 0, 4200), 0, 4200, 0, 180);
-        int servoRelativeDeg = servoAngleDeg - 90; // Pro přehledný výpis (-90° až +90°)
+        int servoAngleDeg = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+        int servoRelativeDeg = servoAngleDeg - 88; // Pro přehledný výpis (-90° až +90°)
         sensorManager.setServoClassic(servoAngleDeg);
+
+        // Řízení kontinuálního 360° serva joystickem (osa X):
+        // Vlevo (X < 1200) -> plná rychlost na jednu stranu (-100 %)
+        // Vpravo (X > 2800) -> plná rychlost na druhou stranu (+100 %)
+        // Střed (klid) -> stop (0 %)
+        int8_t contSpeed = 0;
+        if (in.joyX < 1200) {
+            contSpeed = -100; // Maximální rychlost vlevo
+        } else if (in.joyX > 2800) {
+            contSpeed = 100;  // Maximální rychlost vpravo
+        } else {
+            contSpeed = 0;    // Zastaveno
+        }
+        sensorManager.setServoCont(contSpeed);
 
         unsigned long now = millis();
 
@@ -138,10 +152,10 @@ void Task_Sensors(void *pvParameters) {
         if (now - lastPrintTime >= 250) {
             lastPrintTime = now;
 
-            Serial.printf("[TEST] POT: %4d -> SERVO: %3d deg (%+3d) | JOY: X=%4d Y=%4d SW=%d | BTN: [%d %d %d %d %d] | SW: [SW1(LED)=%s SW2(LED)=%s] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d\n",
+            Serial.printf("[TEST] POT: %4d -> SERVO: %3d deg (%+3d) | JOY: X=%4d Y=%4d (CONT: %+4d%%) SW=%d | BTN: [%d %d %d %d %d] | SW: [SW1(LED)=%s SW2(LED)=%s] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d\n",
                           in.potentiometer,
                           servoAngleDeg, servoRelativeDeg,
-                          in.joyX, in.joyY, in.joyBtn ? 1 : 0,
+                          in.joyX, in.joyY, contSpeed, in.joyBtn ? 1 : 0,
                           in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
                           in.switch1 ? "ON" : "OFF", in.switch2 ? "ON" : "OFF",
                           in.limitMin ? 1 : 0, in.limitMax ? 1 : 0,
@@ -154,7 +168,7 @@ void Task_Sensors(void *pvParameters) {
             snprintf(line2, sizeof(line2), "B:%d%d%d%d%d L:%d,%d",
                      in.btnDown[0], in.btnDown[1], in.btnDown[2], in.btnDown[3], in.btnDown[4],
                      in.limitMin, in.limitMax);
-            sensorManager.updateOled(line1, line2);
+            sensorManager.updateOled(line1, line2);4200
 
             // 4. Efekt plynulé změny barvy na LED pásku
             uint32_t colors[8];
