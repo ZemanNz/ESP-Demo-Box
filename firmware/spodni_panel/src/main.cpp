@@ -120,11 +120,52 @@ void Task_Sensors(void *pvParameters) {
     unsigned long lastPrintTime = 0;
     uint8_t ledHue = 0;
 
+    // Testovací sekvence pro Smart Servo LX-16A:
+    // Přečte počáteční pozici, pohne o +5°, pak o -5° (celkem -10° relativně), a pak zpět o +5° na výchozí pozici.
+    static int smartTestStep = 0;
+    static unsigned long smartStepTime = millis() + 2000; // Počkáme 2 sekundy po startu
+    static int16_t smartBaseAngle = -1;
+    static int16_t currentTargetAngle = -1;
+
     for (;;) {
         // 1. Přečteme veškeré vstupy (Joystick, Pot, Tlačítka, Switche, Enkodér, Dorazy)
         sensorManager.updateAllInputs();
 
         BottomInputs in = globalState.getInputs();
+
+        unsigned long now = millis();
+
+        // Bezpečný jemný test Smart Serva LX-16A (+5° -> -5° -> původní)
+        if (now >= smartStepTime) {
+            if (smartTestStep == 0) {
+                // Krok 0: Přečteme výchozí pozici ze serva
+                int16_t readPos = sensorManager.getSmartServoAngle();
+                if (readPos >= 0 && readPos <= 240) {
+                    smartBaseAngle = readPos;
+                    currentTargetAngle = constrain(smartBaseAngle + 5, 0, 240);
+                    Serial.printf("\n[SMART_SERVO TEST] Vychozi pozice: %d deg -> Pohyb o +5 deg na: %d deg\n", smartBaseAngle, currentTargetAngle);
+                    sensorManager.setSmartServo(currentTargetAngle);
+                    smartTestStep = 1;
+                    smartStepTime = now + 1500; // Počkáme 1.5s na dokončení pohybu
+                } else {
+                    smartStepTime = now + 2000; // Zkusíme znovu za 2s, pokud servo ještě neodpovídá
+                }
+            } else if (smartTestStep == 1) {
+                // Krok 1: Pohyb o 10° zpět (čili Base - 5°)
+                currentTargetAngle = constrain(smartBaseAngle - 5, 0, 240);
+                Serial.printf("\n[SMART_SERVO TEST] Pohyb o -10 deg na: %d deg\n", currentTargetAngle);
+                sensorManager.setSmartServo(currentTargetAngle);
+                smartTestStep = 2;
+                smartStepTime = now + 1500;
+            } else if (smartTestStep == 2) {
+                // Krok 2: Návrat na původní výchozí pozici
+                currentTargetAngle = smartBaseAngle;
+                Serial.printf("\n[SMART_SERVO TEST] Navrat na puvodni vychozi pozici: %d deg (HOTOVO)\n", currentTargetAngle);
+                sensorManager.setSmartServo(currentTargetAngle);
+                smartTestStep = 3; // Hotovo, už se nehýbe
+                smartStepTime = now + 9999999;
+            }
+        }
 
         // Řízení klasického 180° serva podle potenciometru:
         // Potenciometr 0 až 4200 namapován na úhel serva 0° až 180° (což odpovídá -90° až +90°)
@@ -138,28 +179,27 @@ void Task_Sensors(void *pvParameters) {
         // Střed (klid) -> stop (0 %)
         int8_t contSpeed = 0;
         if (in.joyX < 1200) {
-            contSpeed = -100; // Maximální rychlost vlevo
+            contSpeed = 100; // Maximální rychlost vlevo
         } else if (in.joyX > 2800) {
-            contSpeed = 100;  // Maximální rychlost vpravo
+            contSpeed = -100;  // Maximální rychlost vpravo
         } else {
             contSpeed = 0;    // Zastaveno
         }
         sensorManager.setServoCont(contSpeed);
 
-        unsigned long now = millis();
-
         // 2. Periodický přehledný výpis do Serial Monitoru (každých 250 ms)
         if (now - lastPrintTime >= 250) {
             lastPrintTime = now;
 
-            Serial.printf("[TEST] POT: %4d -> SERVO: %3d deg (%+3d) | JOY: X=%4d Y=%4d (CONT: %+4d%%) SW=%d | BTN: [%d %d %d %d %d] | SW: [SW1(LED)=%s SW2(LED)=%s] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d\n",
+            Serial.printf("[TEST] POT: %4d -> SERVO: %3d deg (%+3d) | JOY: X=%4d Y=%4d (CONT: %+4d%%) SW=%d | BTN: [%d %d %d %d %d] | SW: [SW1(LED)=%s SW2(LED)=%s] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d | SMART: %3d deg\n",
                           in.potentiometer,
                           servoAngleDeg, servoRelativeDeg,
                           in.joyX, in.joyY, contSpeed, in.joyBtn ? 1 : 0,
                           in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
                           in.switch1 ? "ON" : "OFF", in.switch2 ? "ON" : "OFF",
                           in.limitMin ? 1 : 0, in.limitMax ? 1 : 0,
-                          in.encoderPos);
+                          in.encoderPos,
+                          (smartBaseAngle >= 0) ? currentTargetAngle : -1);
 
             // 3. Živé zobrazení na OLED displeji
             char line1[17];
@@ -168,7 +208,7 @@ void Task_Sensors(void *pvParameters) {
             snprintf(line2, sizeof(line2), "B:%d%d%d%d%d L:%d,%d",
                      in.btnDown[0], in.btnDown[1], in.btnDown[2], in.btnDown[3], in.btnDown[4],
                      in.limitMin, in.limitMax);
-            sensorManager.updateOled(line1, line2);4200
+            sensorManager.updateOled(line1, line2);
 
             // 4. Efekt plynulé změny barvy na LED pásku
             uint32_t colors[8];
