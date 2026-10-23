@@ -14,10 +14,10 @@ SystemState globalState;
 // 1. Task: UART Komunikace s Horním panelem (Core 0)
 // ---------------------------------------------------------
 void Task_UART(void *pvParameters) {
+#ifdef ENABLE_UART_TOP
     Serial.print("[TASK] Task_UART bezi na jadre: ");
     Serial.println(xPortGetCoreID());
 
-#ifdef ENABLE_UART_TOP
     unsigned long lastSendTime = 0;
     TopToBottomPacket inPacket;
     BottomToTopPacket outPacket;
@@ -171,7 +171,7 @@ void Task_Sensors(void *pvParameters) {
                 }
                 colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
             }
-            sensorManager.setLedStrip(colors, 40);
+            sensorManager.setLedStrip(colors, 20);
             ledHue += 5;
         }
 
@@ -194,7 +194,9 @@ void setup() {
     waitForHandshakeWithTop(hwOk, lastHardwareError);
 
     // 3. Spuštění FreeRTOS úloh
+#ifdef ENABLE_UART_TOP
     xTaskCreatePinnedToCore(Task_UART, "UART_Bottom", 4096, NULL, 2, NULL, 0); // Core 0
+#endif
     xTaskCreatePinnedToCore(Task_Sensors, "Sensors_Bottom", 4096, NULL, 1, NULL, 1); // Core 1
 
     Serial.println("[SYSTEM] Vsechna vlakna spodniho panelu uspesne spustena!");
