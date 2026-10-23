@@ -125,7 +125,12 @@ void Task_Sensors(void *pvParameters) {
         sensorManager.updateAllInputs();
 
         BottomInputs in = globalState.getInputs();
-        int16_t smartAngle = sensorManager.getSmartServoAngle();
+
+        // Řízení klasického 180° serva podle potenciometru:
+        // Potenciometr 0 až 4200 namapován na úhel serva 0° až 180° (což odpovídá -90° až +90°)
+        int servoAngleDeg = map(constrain((int)in.potentiometer, 0, 4200), 0, 4200, 0, 180);
+        int servoRelativeDeg = servoAngleDeg - 90; // Pro přehledný výpis (-90° až +90°)
+        sensorManager.setServoClassic(servoAngleDeg);
 
         unsigned long now = millis();
 
@@ -133,14 +138,14 @@ void Task_Sensors(void *pvParameters) {
         if (now - lastPrintTime >= 250) {
             lastPrintTime = now;
 
-            Serial.printf("[TEST] POT: %4d | JOY: X=%4d Y=%4d SW=%d | BTN: [%d %d %d %d %d] | SW: [%d %d] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d | SMART: %3d deg\n",
+            Serial.printf("[TEST] POT: %4d -> SERVO: %3d deg (%+3d) | JOY: X=%4d Y=%4d SW=%d | BTN: [%d %d %d %d %d] | SW: [SW1(LED)=%s SW2(LED)=%s] | LIMIT: [MIN=%d MAX=%d] | ENC: %4d\n",
                           in.potentiometer,
+                          servoAngleDeg, servoRelativeDeg,
                           in.joyX, in.joyY, in.joyBtn ? 1 : 0,
                           in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
-                          in.switch1 ? 1 : 0, in.switch2 ? 1 : 0,
+                          in.switch1 ? "ON" : "OFF", in.switch2 ? "ON" : "OFF",
                           in.limitMin ? 1 : 0, in.limitMax ? 1 : 0,
-                          in.encoderPos,
-                          smartAngle);
+                          in.encoderPos);
 
             // 3. Živé zobrazení na OLED displeji
             char line1[17];
