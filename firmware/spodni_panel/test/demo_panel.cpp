@@ -310,22 +310,34 @@ void loop() {
   // ── Smart Servo LX-16A ───────────────────────────────────────────────────
 #ifdef ENABLE_SMART_SERVO
   {
-    static float targetDeg = 0.0f;
-    Angle targetAngle = Angle::deg(targetDeg);
-
-    Serial.printf("[SMART_SERVO] Příkaz k přesunu ID %d na: %.1f deg\n", g_smartServoId, targetDeg);
-    servoBus.set(g_smartServoId, targetAngle);
+    static int step = 0;
+    static float baseDeg = -1.0f;
 
     Angle currentAngle = servoBus.pos(g_smartServoId);
     if (!currentAngle.isNaN()) {
       Serial.printf("[SMART_SERVO] Aktuální pozice: %.1f deg\n", currentAngle.deg());
+      if (baseDeg < 0.0f) {
+        baseDeg = currentAngle.deg();
+      }
     } else {
       Serial.printf("[SMART_SERVO] Pozice pro ID %d neodpovídá (offline/timeout)\n", g_smartServoId);
     }
 
-    targetDeg += 60.0f;
-    if (targetDeg > 240.0f) {
-      targetDeg = 0.0f;
+    if (baseDeg >= 0.0f) {
+      float targetDeg = baseDeg;
+      if (step == 0) {
+        targetDeg = baseDeg + 10.0f; // +10 stupňů tam
+        step = 1;
+      } else if (step == 1) {
+        targetDeg = baseDeg - 10.0f; // -10 stupňů na druhou stranu
+        step = 2;
+      } else {
+        targetDeg = baseDeg;         // zpět na výchozí pozici
+        step = 0;
+      }
+
+      Serial.printf("[SMART_SERVO] Příkaz k přesunu ID %d na: %.1f deg (krok %d)\n", g_smartServoId, targetDeg, step);
+      servoBus.set(g_smartServoId, Angle::deg(targetDeg));
     }
   }
 #endif

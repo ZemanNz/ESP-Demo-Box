@@ -12,18 +12,18 @@
 //  MODULÁRNÍ PŘEPÍNAČE (Odkomentuj pro aktivaci daného modulu)
 // =============================================================================
 
-#define ENABLE_OLED_SSD1306    // 0.96" OLED displej (I2C 0x3C, Adafruit_SSD1306)
+//#define ENABLE_OLED_SSD1306    // 0.96" OLED displej (I2C 0x3C, Adafruit_SSD1306)
 //#define ENABLE_UART_TOP      // UART komunikace s Horním panelem (Dočasně deaktivováno pro samostatný test)
-#define ENABLE_JOYSTICK        // Analogový joystick (X, Y) a tlačítko (SW)
-#define ENABLE_POTENTIOMETER   // Analogový potenciometr
-#define ENABLE_ENCODER         // Rotační enkodér (CLK, DT)
-#define ENABLE_BUTTONS         // Digitální tlačítka (1 až 5 / směrový kříž)
-#define ENABLE_SWITCHES        // Páčkové přepínače (1 a 2)
-#define ENABLE_SERVO_CLASSIC   // Klasické PWM servo (0-180°)
-#define ENABLE_SERVO_CONT      // Kontinuální PWM servo (360°)
+//#define ENABLE_JOYSTICK        // Analogový joystick (X, Y) a tlačítko (SW)
+//#define ENABLE_POTENTIOMETER   // Analogový potenciometr
+//#define ENABLE_ENCODER         // Rotační enkodér (CLK, DT)
+//#define ENABLE_BUTTONS         // Digitální tlačítka (1 až 5 / směrový kříž)
+//#define ENABLE_SWITCHES        // Páčkové přepínače (1 a 2)
+//#define ENABLE_SERVO_CLASSIC   // Klasické PWM servo (0-180°)
+//#define ENABLE_SERVO_CONT      // Kontinuální PWM servo (360°)
 #define ENABLE_SMART_SERVO     // Jednodrátové Smart Servo LX-16A (UART)
-#define ENABLE_LIMIT_SWITCHES  // Koncové spínače lineárního posuvu (MIN a MAX)
-#define ENABLE_LED_STRIP       // Adresovatelný LED pásek WS2812B
+//#define ENABLE_LIMIT_SWITCHES  // Koncové spínače lineárního posuvu (MIN a MAX)
+//#define ENABLE_LED_STRIP       // Adresovatelný LED pásek WS2812B
 //#define ENABLE_I2C           // Samostatné skenování I2C sběrnice
 
 // Kompatibilita pro novější názvy modulů

@@ -55,28 +55,50 @@ void setup() {
   }
 }
 
-// Pomocná funkce pro přesun na cílový úhel a sledování pohybu
-void moveToAngle(Angle targetAngle) {
-  Serial.printf("\n>>> Prikaz k presunu na: %.1f stupnu\n", targetAngle.deg());
-  servoBus.set(0, targetAngle);
-
-  // Sledování pohybu po dobu 2 sekund (10 kroků po 200 ms)
-  for (int i = 0; i < 10; i++) {
-    delay(200);
-    // Načtení aktuální polohy z čidla serva
-    Angle currentAngle = servoBus.pos(0);
-    if (!currentAngle.isNaN()) {
-      Serial.printf("    Aktualni pozice: %.1f stupnu\n", currentAngle.deg());
-    } else {
-      Serial.println("    Aktualni pozice: neodpovida (offline)");
-    }
-  }
-}
-
 void loop() {
-  // Postupný pohyb: 0 -> 120 -> 240 -> 120 -> opakování
-  moveToAngle(0_deg);
-  moveToAngle(120_deg);
-  moveToAngle(240_deg);
-  moveToAngle(120_deg);
+  // 1. Zjistíme aktuální polohu serva jako výchozí bod
+  Angle startAngle = servoBus.pos(0);
+  if (startAngle.isNaN()) {
+    Serial.println("[Loop] Nelze nacist pozici serva 0, zkousim znovu...");
+    delay(1000);
+    return;
+  }
+
+  float baseDeg = startAngle.deg();
+  Serial.printf("\n============================================\n");
+  Serial.printf("[SMART_SERVO] Vychozi pozice: %.1f stupnu\n", baseDeg);
+
+  // Bezpečný rozsah (0 až 240 stupňů max pro LX-16A)
+  float targetPlus = baseDeg + 20.0f;
+  if (targetPlus > 235.0f) targetPlus = 235.0f;
+
+  float targetMinus = baseDeg - 20.0f;
+  if (targetMinus < 5.0f) targetMinus = 5.0f;
+
+  // 2. Pohyb o +20 stupňů tam
+  Serial.printf("[SMART_SERVO] Pohyb o +20 deg -> Cil: %.1f deg\n", targetPlus);
+  servoBus.set(0, Angle::deg(targetPlus), 120.0f); // Klidná, bezpečná rychlost
+  delay(1500);
+  Serial.printf("    Aktualni pozice po pohybu: %.1f deg\n", servoBus.pos(0).deg());
+
+  // 3. Pohyb o 20 stupňů zpět na výchozí
+  Serial.printf("[SMART_SERVO] Pohyb zpet na vychozi -> Cil: %.1f deg\n", baseDeg);
+  servoBus.set(0, Angle::deg(baseDeg), 120.0f);
+  delay(1500);
+  Serial.printf("    Aktualni pozice po pohybu: %.1f deg\n", servoBus.pos(0).deg());
+
+  // 4. Pohyb o -20 stupňů na druhou stranu
+  Serial.printf("[SMART_SERVO] Pohyb o -20 deg -> Cil: %.1f deg\n", targetMinus);
+  servoBus.set(0, Angle::deg(targetMinus), 120.0f);
+  delay(1500);
+  Serial.printf("    Aktualni pozice po pohybu: %.1f deg\n", servoBus.pos(0).deg());
+
+  // 5. Zpět na výchozí
+  Serial.printf("[SMART_SERVO] Pohyb zpet na vychozi -> Cil: %.1f deg\n", baseDeg);
+  servoBus.set(0, Angle::deg(baseDeg), 120.0f);
+  delay(1500);
+  Serial.printf("    Aktualni pozice po pohybu: %.1f deg\n", servoBus.pos(0).deg());
+
+  Serial.println("[SMART_SERVO] Cyklus dokoncen. Pauza 2 sekundy...");
+  delay(2000);
 }

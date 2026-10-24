@@ -81,7 +81,28 @@ bool setupDisplay() {
 bool setupServosAndMotors() {
     Serial.println("[SETUP] Inicializace serv a motoru...");
 
-    // Alokace PWM časovačů pro ESP32Servo
+    // 1. Smart Servo LX-16A (Jednodrátový UART)
+    // Inicializujeme PŘED alokací PWM časovačů a připojením ostatních serv!
+#ifdef ENABLE_SMART_SERVO
+    Serial.printf("[SMART_SERVO] Inicializuji SmartServoBus na GPIO %d...\n", PIN_SMART_SERVO);
+    servoBus.begin(1, UART_NUM_2, (gpio_num_t)PIN_SMART_SERVO);
+    delay(1000); // Nutná pauza 1s pro stabilizaci sběrnice
+
+    Serial.printf("[SMART_SERVO] Testuji LX-16A (dotaz na ID)... \n");
+    uint8_t id = servoBus.getId();
+    if (id == 255) {
+        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (broadcast 254). Pokračuji..."));
+    } else {
+        Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
+        if (id != 0) {
+            Serial.printf("[SMART_SERVO] Menim ID serva z %d na 0...\n", id);
+            servoBus.setId(0);
+            delay(500);
+        }
+    }
+#endif
+
+    // 2. Alokace PWM časovačů pro ESP32Servo
 #if defined(ENABLE_SERVO_CLASSIC) || defined(ENABLE_SERVO_CONT)
     ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
@@ -110,25 +131,6 @@ bool setupServosAndMotors() {
     pinMode(PIN_LIMIT_MIN, INPUT_PULLUP);
     pinMode(PIN_LIMIT_MAX, INPUT); // GPIO35 vyžaduje externí 10k rezistor k 3.3V
     Serial.printf("[LIMIT_SWITCHES] OK – Min: GPIO %d, Max: GPIO %d\n", PIN_LIMIT_MIN, PIN_LIMIT_MAX);
-#endif
-
-    // Smart Servo LX-16A (Jednodrátový UART)
-#ifdef ENABLE_SMART_SERVO
-    servoBus.begin(1, UART_NUM_2, (gpio_num_t)PIN_SMART_SERVO);
-    delay(1000); // Nutná pauza 1s pro stabilizaci sběrnice přesně jako v funkčním příkladu
-
-    Serial.printf("[SMART_SERVO] Testuji LX-16A na GPIO %d...\n", PIN_SMART_SERVO);
-    uint8_t id = servoBus.getId();
-    if (id == 255) {
-        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (broadcast 254). Pokračuji..."));
-    } else {
-        Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
-        if (id != 0) {
-            Serial.printf("[SMART_SERVO] Menim ID serva z %d na 0...\n", id);
-            servoBus.setId(0);
-            delay(500);
-        }
-    }
 #endif
 
     return true;
