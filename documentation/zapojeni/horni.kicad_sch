@@ -6564,12 +6564,6 @@
 		(uuid "5b2b79b8-2239-4069-a6aa-1b1b0fe01075")
 	)
 	(junction
-		(at 275.59 26.67)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "6abf7ce9-c1ce-4cff-a0da-8bf4f8e4ced5")
-	)
-	(junction
 		(at 20.32 81.28)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -6805,16 +6799,6 @@
 	)
 	(wire
 		(pts
-			(xy 269.24 26.67) (xy 275.59 26.67)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "26009c4f-9c35-4da5-bcff-de3d40e678d6")
-	)
-	(wire
-		(pts
 			(xy 217.17 43.18) (xy 222.25 43.18)
 		)
 		(stroke
@@ -6822,6 +6806,16 @@
 			(type default)
 		)
 		(uuid "28f09489-0966-431a-8595-5e6486947692")
+	)
+	(wire
+		(pts
+			(xy 269.24 26.67) (xy 275.59 26.67)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2d8042d6-9407-42b4-ba7e-eb3f7aa908e6")
 	)
 	(wire
 		(pts
@@ -7943,16 +7937,6 @@
 			(type default)
 		)
 		(uuid "e34d2a7e-0af9-4bd3-a50f-32bdfd99830d")
-	)
-	(wire
-		(pts
-			(xy 278.13 26.67) (xy 275.59 26.67)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "e564d670-ee6c-4c69-9427-196791617b5b")
 	)
 	(wire
 		(pts
@@ -9290,7 +9274,7 @@
 				)
 			)
 		)
-		(property "Value" "220R"
+		(property "Value" "1k"
 			(at 207.01 22.86 90)
 			(effects
 				(font
@@ -9977,7 +9961,7 @@
 				)
 			)
 		)
-		(property "Value" "220R"
+		(property "Value" "1k"
 			(at 160.02 22.86 90)
 			(effects
 				(font
@@ -11539,7 +11523,7 @@
 				)
 			)
 		)
-		(property "Value" "220R"
+		(property "Value" "1k"
 			(at 251.46 22.86 90)
 			(effects
 				(font
