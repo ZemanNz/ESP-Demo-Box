@@ -43,6 +43,17 @@
 #define PIN_SMART_SERVO     14   // Jednodrátový UART pro LX-16A Smart Servo
 #define PIN_SERVO_SMA       PIN_SMART_SERVO
 
+// Limity úhlu pro Smart Servo LX-16A (stupně)
+#define SMART_SERVO_MIN_DEG   0
+#define SMART_SERVO_MAX_DEG  70
+
+// AutoStop ochrana při mechanickém odporu (přetížení / sevření kostky):
+// Rozdíl mezi požadovaným a reálným úhlem v centistupních (1° = 100 centistupňů).
+// 1000 = 10.0° rozdíl pro detekci odporu
+#define SMART_SERVO_AUTOSTOP_DIFF_CENTIDEG  1000
+// Počet po sobě jdoucích měření s tímto rozdílem před zastavením serva (2x = 60 ms)
+#define SMART_SERVO_AUTOSTOP_READINGS       2
+
 // =============================================================================
 //  OLED DISPLEJ 0.96" (I2C SSD1306)
 // =============================================================================

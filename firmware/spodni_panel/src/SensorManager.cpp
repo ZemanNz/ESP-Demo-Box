@@ -135,9 +135,8 @@ void SensorManager::updateAllInputs() {
 
 void SensorManager::setSmartServo(int16_t angle) {
 #ifdef ENABLE_SMART_SERVO
-    if (angle >= 0 && angle <= 240) {
-        servoBus.set(0, Angle::deg((float)angle));
-    }
+    int16_t clampedAngle = constrain(angle, SMART_SERVO_MIN_DEG, SMART_SERVO_MAX_DEG);
+    servoBus.set(0, Angle::deg((float)clampedAngle));
 #endif
 }
 
@@ -149,6 +148,17 @@ void SensorManager::setServoClassic(uint8_t angle) {
 
 void SensorManager::setServoCont(int8_t speed) {
 #ifdef ENABLE_SERVO_CONT
+    // Bezpečnostní kontrola koncových spínačů:
+    // Pokud je sepnut limitMin (GPIO 25, vlevo, speed > 0), nelze jet dál doleva.
+    // Pokud je sepnut limitMax (GPIO 35, vpravo, speed < 0), nelze jet dál doprava.
+    BottomInputs in = globalState.getInputs();
+    if (in.limitMin && speed > 0) {
+        speed = 0; // Zastavit pohyb vlevo
+    }
+    if (in.limitMax && speed < 0) {
+        speed = 0; // Zastavit pohyb vpravo
+    }
+
     // speed -100 až +100 % mapováno na 0..180 (90 = stop)
     int val = map(constrain(speed, -100, 100), -100, 100, 0, 180);
     servoCont.write(val);
@@ -171,7 +181,7 @@ void SensorManager::setLedStrip(const uint32_t leds[8], uint8_t brightness) {
 #endif
 }
 
-void SensorManager::updateOled(const char* line1, const char* line2) {
+void SensorManager::updateOled(const char* line1, const char* line2, const char* line3, const char* line4) {
 #ifdef ENABLE_OLED_SSD1306
     display.clearDisplay();
     display.setTextSize(1);
@@ -181,14 +191,32 @@ void SensorManager::updateOled(const char* line1, const char* line2) {
     display.drawFastHLine(0, 10, 128, SSD1306_WHITE);
 
     if (line1 && strlen(line1) > 0) {
-        display.setCursor(0, 18);
+        display.setCursor(0, 14);
         display.println(line1);
     }
     if (line2 && strlen(line2) > 0) {
-        display.setCursor(0, 32);
+        display.setCursor(0, 26);
         display.println(line2);
     }
+    if (line3 && strlen(line3) > 0) {
+        display.setCursor(0, 38);
+        display.println(line3);
+    }
+    if (line4 && strlen(line4) > 0) {
+        display.setCursor(0, 50);
+        display.println(line4);
+    }
     display.display();
+#endif
+}
+
+void SensorManager::updateAutoStopParams(int16_t diffCentideg, uint8_t readings) {
+#ifdef ENABLE_SMART_SERVO
+    SmartServoBus::AutoStopParams params = {
+        .max_diff_centideg = diffCentideg,
+        .max_diff_readings = readings
+    };
+    servoBus.setAutoStopParams(params);
 #endif
 }
 

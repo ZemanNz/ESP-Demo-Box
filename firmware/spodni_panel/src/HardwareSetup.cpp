@@ -99,6 +99,19 @@ bool setupServosAndMotors() {
             servoBus.setId(0);
             delay(500);
         }
+
+        // Aktivace a konfigurace AutoStop ochrany proti přetížení / odporu (např. sevření kostky):
+        SmartServoBus::AutoStopParams autoStopCfg = {
+            .max_diff_centideg = SMART_SERVO_AUTOSTOP_DIFF_CENTIDEG,
+            .max_diff_readings = SMART_SERVO_AUTOSTOP_READINGS,
+        };
+        servoBus.setAutoStopParams(autoStopCfg);
+        servoBus.setAutoStop(0, true);
+        // Hardwarové limity přímo v paměti serva LX-16A
+        servoBus.limit(0, Angle::deg(SMART_SERVO_MIN_DEG), Angle::deg(SMART_SERVO_MAX_DEG));
+        Serial.printf("[SMART_SERVO] Limity nastaveny na %d až %d deg\n", SMART_SERVO_MIN_DEG, SMART_SERVO_MAX_DEG);
+        Serial.printf("[SMART_SERVO] AutoStop aktivovan (citlivost: %.1f deg, pocty cteni: %d)\n",
+                      SMART_SERVO_AUTOSTOP_DIFF_CENTIDEG / 100.0f, SMART_SERVO_AUTOSTOP_READINGS);
     }
 #endif
 
