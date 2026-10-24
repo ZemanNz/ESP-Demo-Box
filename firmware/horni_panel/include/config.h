@@ -17,17 +17,17 @@
 #define ENABLE_IR_SENSORS     // IR digitální senzory (IR1, IR2)
 #define ENABLE_PHOTORESISTORS // Analogové fotorezistory (2x)
 #define ENABLE_BUTTONS        // Uživatelské tlačítko INFO
-#define ENABLE_BUZZER         // Pasivní piezo bzučák
+//#define ENABLE_BUZZER       // Pasivní piezo bzučák - VYPNUTO
 #define ENABLE_LEDS           // Indikační LED diody (3x)
 #define ENABLE_WS2812B        // Adresovatelný LED pásek WS2812B (FastLED / NeoPixel)
 #define ENABLE_MAX7219        // 3-místný sedmisegmentový displej (MAX7219)
-//#define ENABLE_74HC595      // Původní sedmisegment přes 74HC595
+#define ENABLE_74HC595        // Původní sedmisegment přes 74HC595
 #define ENABLE_TFT_ST7789     // TFT 2.8" displej (SPI)
 #define ENABLE_LSM6DS3        // Gyroskop / akcelerometr LSM6DS3 (I2C_0)
 #define ENABLE_LCD1602        // Znakový LCD displej 16x2 (I2C_0, 0x27)
 #define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
 #define ENABLE_TCS34725       // Barevný RGB senzor TCS34725 (I2C_1, 0x29)
-#define ENABLE_UART_ESP       // UART komunikace se spodním panelem (Serial1)
+//#define ENABLE_UART_ESP       // UART komunikace se spodním panelem (Serial1) - docasne vypnuto pro test horniho panelu
 #define ENABLE_WIFI_WEB       // Wi-Fi a WebServer (SoftAP + Captive Portal + WebSocket)
 
 // Kompatibilita pro novější názvy modulů
@@ -134,9 +134,14 @@
 #define PIN_US_TRIG          PIN_ULTRASONIC_TRIG
 #define PIN_US_ECHO          PIN_ULTRASONIC_ECHO
 
-// Infračervené senzory překážky
-#define PIN_IR1              48   // IR Senzor 1 (přesunuto z RST na uvolněné GPIO 48)
-#define PIN_IR2              38   // IR Senzor 2 (GPIO 38)
+// Infračervené senzory
+// IR1 = Analogový senzor vzdálenosti (GPIO 20, ADC2_CH9)
+// IR2 = Digitální detekce překážky (GPIO 38)
+#define PIN_IR1              20   // IR Senzor 1 (Analogovy dálkoměr na GPIO 20)
+#define PIN_IR2              38   // IR Senzor 2 (Digitální detekce překážky na GPIO 38)
+#define PIN_IR_DIST          PIN_IR1
+#define PIN_IR_ANALOG        PIN_IR1
+#define PIN_IR_OBSTACLE      PIN_IR2
 #define PIN_IR_1             PIN_IR1
 #define PIN_IR_2             PIN_IR2
 
@@ -145,9 +150,12 @@
 // =============================================================================
 // V kódu v setup(): pinMode(PIN_..., OUTPUT);
 #define PIN_BUZZER            7   // Pasivní piezo bzučák (tone())
-#define PIN_LED1             39   // LED D1 přes 220R k zemi
-#define PIN_LED2             40   // LED D4 přes 220R k zemi
-#define PIN_LED3             41   // LED D5 přes 220R k zemi
+#define PIN_LED_IR           39   // LED D1 (nad IR senzorem)
+#define PIN_LED_ULT          40   // LED D4 (nad Ultrazvukem)
+#define PIN_LED_LASER        41   // LED D5 (nad Laserem)
+#define PIN_LED1             PIN_LED_IR
+#define PIN_LED2             PIN_LED_ULT
+#define PIN_LED3             PIN_LED_LASER
 #define PIN_LED_1            PIN_LED1
 #define PIN_LED_2            PIN_LED2
 #define PIN_LED_3            PIN_LED3

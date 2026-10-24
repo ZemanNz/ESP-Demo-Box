@@ -79,26 +79,54 @@ void SensorManager::readVL53L0X() {
 #endif
 }
 
-// Infračervený senzor vzdálenosti (např. analogový Sharp nebo fototranzistor)
+// Infračervený senzor vzdálenosti (IR1 - analog na GPIO 20)
+// Kalibrační křivka z naměřených bodů:
+//  230 -> 2 cm, 1000 -> 3 cm, 2300 -> 4 cm, 3150 -> 5 cm,
+// 3550 -> 6 cm, 3730 -> 7 cm, 3850 -> 8 cm, 4040 -> 9 cm
 void SensorManager::readIRDistance() {
 #ifdef ENABLE_IR_SENSORS
-    // Pokud je zapojen analogový IR dálkoměr, přečteme ADC a přepočteme na cm
-    #ifdef PIN_IR_ANALOG
-        int raw = analogRead(PIN_IR_ANALOG);
-        float distCm = (raw > 0) ? (12343.85f / (raw - 15.0f)) : -1.0f;
-        globalState.updateIRDistance(distCm);
-    #else
-        // Fallback pro digitální IR stav (1.0 cm = překážka, -1.0 cm = volno)
-        bool obstacle = (digitalRead(PIN_IR1) == LOW);
-        globalState.updateIRDistance(obstacle ? 1.0f : -1.0f);
-    #endif
+    int raw = analogRead(PIN_IR1);
+    float distCm = -1.0f;
+
+    if (raw < 100) {
+        distCm = -1.0f; // Mimo dosah / volno
+    } else if (raw <= 230) {
+        // 100 až 230 -> 1.0 až 2.0 cm
+        distCm = 1.0f + ((float)(raw - 100) / 130.0f) * 1.0f;
+    } else if (raw <= 1000) {
+        // 230 až 1000 -> 2.0 až 3.0 cm
+        distCm = 2.0f + ((float)(raw - 230) / 770.0f) * 1.0f;
+    } else if (raw <= 2300) {
+        // 1000 až 2300 -> 3.0 až 4.0 cm
+        distCm = 3.0f + ((float)(raw - 1000) / 1300.0f) * 1.0f;
+    } else if (raw <= 3150) {
+        // 2300 až 3150 -> 4.0 až 5.0 cm
+        distCm = 4.0f + ((float)(raw - 2300) / 850.0f) * 1.0f;
+    } else if (raw <= 3550) {
+        // 3150 až 3550 -> 5.0 až 6.0 cm
+        distCm = 5.0f + ((float)(raw - 3150) / 400.0f) * 1.0f;
+    } else if (raw <= 3730) {
+        // 3550 až 3730 -> 6.0 až 7.0 cm
+        distCm = 6.0f + ((float)(raw - 3550) / 180.0f) * 1.0f;
+    } else if (raw <= 3850) {
+        // 3730 až 3850 -> 7.0 až 8.0 cm
+        distCm = 7.0f + ((float)(raw - 3730) / 120.0f) * 1.0f;
+    } else if (raw <= 4040) {
+        // 3850 až 4040 -> 8.0 až 9.0 cm
+        distCm = 8.0f + ((float)(raw - 3850) / 190.0f) * 1.0f;
+    } else {
+        // > 4040 (např. 4095) -> mimo dosah / Out of range (jako u laseru > 8000)
+        distCm = -1.0f;
+    }
+
+    globalState.updateIRDistance(distCm);
 #endif
 }
 
-// Digitální IR senzor překážek
+// Digitální IR senzor překážek (IR2 - GPIO 38)
 void SensorManager::readIRObstacle() {
 #ifdef ENABLE_IR_SENSORS
-    bool obstacle = (digitalRead(PIN_IR1) == LOW); // LOW = detekována překážka
+    bool obstacle = (digitalRead(PIN_IR2) == LOW); // LOW = detekována překážka
     globalState.updateIRObstacle(obstacle);
 #endif
 }
@@ -158,13 +186,83 @@ void SensorManager::readColorSensor() {
 #endif
 }
 
-// Gyroskop a Akcelerometr LSM6DS3
+// =============================================================================
+// KALIBRACE GYROSKOPU LSM6DS3 (přesně podle examples/lsm6ds3_gyroscope/main.cpp)
+// =============================================================================
+void SensorManager::calibrateIMU() {
+#ifdef ENABLE_LSM6DS3
+    Serial.println("\n[LSM6DS3] Kalibrace gyroskopu... Uvedte panel do klidu (2 sekundy).");
+    float sumX = 0, sumY = 0, sumZ = 0;
+    const int numSamples = 200;
+
+    for (int i = 0; i < numSamples; i++) {
+        sensors_event_t accel, gyro, temp;
+        lsm6ds3.getEvent(&accel, &gyro, &temp);
+        sumX += gyro.gyro.x;
+        sumY += gyro.gyro.y;
+        sumZ += gyro.gyro.z;
+        delay(10);
+    }
+
+    gyroBiasX = sumX / numSamples;
+    gyroBiasY = sumY / numSamples;
+    gyroBiasZ = sumZ / numSamples;
+
+    // Počáteční úhly: relativní natočení od startu je přesně 0.0°
+    imuAngleX = 0.0f;
+    imuAngleY = 0.0f;
+    imuAngleZ = 0.0f;
+    imuCalibrated = true;
+    lastImuTimeUs = micros();
+
+    Serial.printf("[LSM6DS3] Kalibrace dokoncena! Bias: X=%.4f Y=%.4f Z=%.4f (rad/s)\n\n",
+                  gyroBiasX, gyroBiasY, gyroBiasZ);
+#endif
+}
+
+// Čtení a integrace gyroskopu přesně podle examples/lsm6ds3_gyroscope/main.cpp
 void SensorManager::readIMU() {
 #ifdef ENABLE_LSM6DS3
-    sensors_event_t a, g, temp;
-    lsm6ds3.getEvent(&a, &g, &temp);
-    globalState.updateIMU(a.acceleration.x, a.acceleration.y, a.acceleration.z,
-                          g.gyro.x, g.gyro.y, g.gyro.z);
+    if (!imuCalibrated) {
+        calibrateIMU();
+        return;
+    }
+
+    // 1. Přesný časový krok dt v sekundách
+    unsigned long nowMicros = micros();
+    float dt = (float)(nowMicros - lastImuTimeUs) / 1000000.0f;
+    lastImuTimeUs = nowMicros;
+    if (dt > 0.1f) dt = 0.01f;
+
+    // 2. Načtení dat ze senzoru LSM6DS3
+    sensors_event_t accel, gyro, temp;
+    lsm6ds3.getEvent(&accel, &gyro, &temp);
+
+    // 3. Odečtení kalibrovaného klidového biasu
+    float rawGyroX = gyro.gyro.x - gyroBiasX;
+    float rawGyroY = gyro.gyro.y - gyroBiasY;
+    float rawGyroZ = gyro.gyro.z - gyroBiasZ;
+
+    // 4. Mrtvé pásmo šumu (GYRO_DEADZONE = 0.03 rad/s)
+    const float GYRO_DEADZONE = 0.03f;
+    if (fabsf(rawGyroX) < GYRO_DEADZONE) rawGyroX = 0.0f;
+    if (fabsf(rawGyroY) < GYRO_DEADZONE) rawGyroY = 0.0f;
+    if (fabsf(rawGyroZ) < GYRO_DEADZONE) rawGyroZ = 0.0f;
+
+    // 5. Přepočet úhlové rychlosti z rad/s na stupně/s
+    const float RAD_TO_DEG_CONST = 57.295779513f;
+    float gyroDegSecX = rawGyroX * RAD_TO_DEG_CONST;
+    float gyroDegSecY = rawGyroY * RAD_TO_DEG_CONST;
+    float gyroDegSecZ = rawGyroZ * RAD_TO_DEG_CONST;
+
+    // 6. Čistá integrace úhlu otočení od počáteční polohy (přesně o kolik stupňů se kufr otočil)
+    imuAngleX += gyroDegSecX * dt;
+    imuAngleY += gyroDegSecY * dt;
+    imuAngleZ += gyroDegSecZ * dt;
+
+    // Uložíme do SystemState
+    globalState.updateIMU(accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
+                          imuAngleX, imuAngleY, imuAngleZ);
 #endif
 }
 
@@ -262,16 +360,43 @@ void SensorManager::beep(uint16_t freq, uint32_t durationMs) {
 void SensorManager::set7Segment(int value) {
 #ifdef ENABLE_74HC595
     static const byte segDigits[] = {
-        0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
+        0x3F, // 0
+        0x06, // 1
+        0x5B, // 2
+        0x4F, // 3
+        0x66, // 4
+        0x6D, // 5
+        0x7D, // 6
+        0x07, // 7
+        0x7F, // 8
+        0x6F  // 9
     };
     digitalWrite(PIN_SEG_LATCH, LOW);
-    int temp = value;
-    for (int i = 0; i < SEG_NUM_DIGITS; i++) {
-        int d = temp % 10;
-        byte pattern = (d >= 0 && d <= 9) ? segDigits[d] : 0x00;
-        if (SEG_COMMON_ANODE) pattern = ~pattern;
-        shiftOut(PIN_SEG_DATA, PIN_SEG_CLK, MSBFIRST, pattern);
-        temp /= 10;
+
+    if (value < 0) {
+        // Zhasnout všechny číslice
+        byte blank = SEG_COMMON_ANODE ? 0xFF : 0x00;
+        for (int i = 0; i < SEG_NUM_DIGITS; i++) {
+            shiftOut(PIN_SEG_DATA, PIN_SEG_CLK, MSBFIRST, blank);
+        }
+    } else {
+        long temp = value;
+        for (int i = 0; i < SEG_NUM_DIGITS; i++) {
+            int digit = temp % 10;
+            byte pattern = (digit >= 0 && digit <= 9) ? segDigits[digit] : 0x00;
+
+            // Zhasínání úvodních nul (např. místo 005 zobrazíme "  5")
+            if (temp == 0 && i > 0 && value != 0) {
+                pattern = 0x00;
+            }
+            if (value == 0 && i == 0) {
+                pattern = segDigits[0];
+            }
+
+            if (SEG_COMMON_ANODE) pattern = ~pattern;
+            shiftOut(PIN_SEG_DATA, PIN_SEG_CLK, MSBFIRST, pattern);
+            temp /= 10;
+        }
     }
     digitalWrite(PIN_SEG_LATCH, HIGH);
 #endif

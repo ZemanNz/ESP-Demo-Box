@@ -23,7 +23,9 @@ public:
     void readPhotoresistors();  // 2x Analogový fotorezistor
     void readTopButton();       // Tlačítko na horním panelu
     void readColorSensor();     // Barevný senzor (TCS34725)
-    void readIMU();             // Gyroskop a akcelerometr (LSM6DS3)
+    // Gyroskop a akcelerometr
+    void calibrateIMU();
+    void readIMU();
 
     // Hromadné přečtení všech senzorů
     void updateAllSensors();
@@ -71,6 +73,16 @@ private:
     bool lastTopBtnState = false;
     uint32_t topBtnPressStartTime = 0;
     bool topBtnLongPressHandled = false;
+
+    // Komplementární filtr pro IMU (LSM6DS3)
+    float imuAngleX = 0.0f;
+    float imuAngleY = 0.0f;
+    float imuAngleZ = 0.0f;
+    float gyroBiasX = 0.0f;
+    float gyroBiasY = 0.0f;
+    float gyroBiasZ = 0.0f;
+    bool imuCalibrated = false;
+    unsigned long lastImuTimeUs = 0;
 };
 
 extern SensorManager sensorManager;

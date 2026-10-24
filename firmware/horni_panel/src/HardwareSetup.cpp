@@ -148,12 +148,14 @@ bool setupSensors() {
 #endif
 
 #ifdef ENABLE_VL53L0X
+    vl53.setBus(&Wire);
     vl53.setTimeout(500);
     if (!vl53.init()) {
         drawErrorScreen("VL53L0X Laser dalkomer\nneodpovida na I2C (0x29)!");
         return false;
     }
-    Serial.println("[VL53L0X]   OK – Laser dalkomer pripraven.");
+    vl53.startContinuous(100); // Spuštění kontinuálního měření každých 100 ms
+    Serial.println("[VL53L0X]   OK – Laser dalkomer pripraven (continuous 100ms).");
 #endif
 
 #ifdef ENABLE_TCS34725
@@ -203,10 +205,14 @@ bool setupSensors() {
 #endif
 
 #ifdef ENABLE_IR_SENSORS
+    analogSetPinAttenuation(PIN_IR1, ADC_11db); // IR1: analogové měření vzdálenosti (GPIO 20)
     pinMode(PIN_IR1, INPUT);
+    pinMode(PIN_IR2, INPUT);                    // IR2: digitální překážka (GPIO 38)
 #endif
 
 #ifdef ENABLE_PHOTORESISTORS
+    analogSetPinAttenuation(PIN_PHOTO1, ADC_11db);
+    analogSetPinAttenuation(PIN_PHOTO2, ADC_11db);
     pinMode(PIN_PHOTO1, INPUT);
     pinMode(PIN_PHOTO2, INPUT);
 #endif
@@ -223,9 +229,14 @@ bool setupSensors() {
 #endif
 
 #ifdef ENABLE_LEDS
-    pinMode(PIN_LED1, OUTPUT); digitalWrite(PIN_LED1, LOW);
-    pinMode(PIN_LED2, OUTPUT); digitalWrite(PIN_LED2, LOW);
-    pinMode(PIN_LED3, OUTPUT); digitalWrite(PIN_LED3, LOW);
+    pinMode(PIN_LED1, OUTPUT);
+    pinMode(PIN_LED2, OUTPUT);
+    pinMode(PIN_LED3, OUTPUT);
+
+    // Krátký boot test 3 LED nad senzory (běžící světlo D1 -> D4 -> D5)
+    digitalWrite(PIN_LED1, HIGH); delay(100); digitalWrite(PIN_LED1, LOW);
+    digitalWrite(PIN_LED2, HIGH); delay(100); digitalWrite(PIN_LED2, LOW);
+    digitalWrite(PIN_LED3, HIGH); delay(100); digitalWrite(PIN_LED3, LOW);
 #endif
 
 #ifdef ENABLE_WS2812B

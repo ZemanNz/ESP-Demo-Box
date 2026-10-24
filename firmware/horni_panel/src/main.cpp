@@ -59,28 +59,11 @@ void Task_UART_Simulator(void *pvParameters) {
         float t = millis() / 1000.0f;
 
         // ---------------------------------------------------------
-        // 1. GENERÁTOR NÁHODNÝCH DAT (Změna hodnot cca 3x za 10 sekund)
+        // 1. GENERÁTOR NÁHODNÝCH DAT (JEN PRO SPODNÍ PANEL / SERVA A ENKODÉR)
         // ---------------------------------------------------------
+        // Reálné horní senzory (gyro, barva, vzdálenosti, fotorezistory) čteme živě v Task_Sensors!
         if (timeInMode % 3300 < 50) {
-            // A) Gyroskop: náhodné stabilní úhly v reálném rozsahu (např. -34.2°, +13.9°, +24.8°)
-            float simRoll  = (float)random(-450, 451) / 10.0f;
-            float simPitch = (float)random(-300, 301) / 10.0f;
-            float simYaw   = (float)random(-600, 601) / 10.0f;
-
-            float radR = simRoll * (PI / 180.0f);
-            float radP = simPitch * (PI / 180.0f);
-            float ax = -sin(radP);
-            float ay = sin(radR);
-            float az = cos(radR);
-            globalState.updateIMU(ax, ay, az, simPitch, simRoll, simYaw);
-
-            // B) Barevný senzor: náhodné čisté barvy
-            uint8_t r = random(20, 256);
-            uint8_t g = random(20, 256);
-            uint8_t b = random(20, 256);
-            globalState.updateColor(r, g, b, 200);
-
-            // C) Hlavní menu: náhodné polohy ovladačů
+            // Simulace ovladačů spodního panelu (dokud není aktivní UART)
             int simPot = random(200, 4000);
             globalState.updatePotentiometer(simPot);
 
@@ -88,27 +71,12 @@ void Task_UART_Simulator(void *pvParameters) {
             int simJoyY = random(200, 4000);
             globalState.updateJoystick(simJoyX, simJoyY, false);
 
-            int simPhoto1 = random(300, 3900);
-            int simPhoto2 = random(300, 3900);
-            globalState.updatePhotoresistors(simPhoto1, simPhoto2);
-
             bool b0 = (random(0, 2) == 1);
             bool b1 = (random(0, 2) == 1);
             bool b2 = (random(0, 2) == 1);
             bool b3 = (random(0, 2) == 1);
             bool b4 = (random(0, 2) == 1);
             globalState.updateDownButtons(b0, b1, b2, b3, b4);
-
-            float sim_ultrasonic = (float)random(100, 2000) / 10.0f; // 10.0 až 200.0 cm (100 až 2000 mm)
-            float sim_ir         = (float)random(30, 300) / 10.0f;   // 3.0 až 30.0 cm (30 až 300 mm)
-            uint16_t sim_laser   = (uint16_t)random(80, 1300);       // 80 až 1300 mm
-
-            globalState.updateUltrasonicDistance(sim_ultrasonic);
-            globalState.updateIRDistance(sim_ir);
-            globalState.updateLaserDistance(sim_laser);
-
-            int p = random(0, 3);
-            globalState.updateLeds(p == 0, p == 1, p == 2);
         }
 
         // ---------------------------------------------------------
@@ -253,82 +221,83 @@ void Task_Sensors(void *pvParameters) {
     Serial.print("Task_Sensors bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
+    unsigned long lastSerialPrint = 0;
+
     for (;;) {
         AppMode currentMode = globalState.getMode();
 
         // Kontrola otočení rotačního enkodéru pro změnu módu
         globalState.checkModeChange();
 
-        switch (currentMode) {
-
-            case MODE_SLEEP: {
-                vTaskDelay(pdMS_TO_TICKS(100));
-                break;
-            }
-            
-            case MODE_MAIN_MENU: {
-                sensorManager.readDHT();
-                sensorManager.readUltrasonic();
-                sensorManager.readVL53L0X();
-                sensorManager.readIRDistance();
-                sensorManager.readPhotoresistors();
-                sensorManager.readTopButton();
-                sensorManager.readColorSensor();
-
-                SensorData data = globalState.getSensorData();
-
-                //teplo a vlhkost na 1602
-                sensorManager.writeLCD1602("Temp: " + String(data.temperature, 1) + "C", 
-                                 "Hum: " + String(data.humidity, 1) + "%");
-
-                if(data.led_ult){
-                    sensorManager.set7Segment(data.ultrasonicDistanceCm);
-                    sensorManager.setLeds(true, false, false);
-                }else if(data.led_ir){
-                    sensorManager.set7Segment(data.irDistanceCm);
-                    sensorManager.setLeds(false, true, false);
-                }else if(data.led_laser){
-                    sensorManager.set7Segment(data.laserDistanceMm);
-                    sensorManager.setLeds(false, false, true);
-                }else{
-                    sensorManager.set7Segment(-1); // Zhasneme 7-segmentový displej
-                    sensorManager.setLeds(false, false, false);
-                }
-
-                //horni led pasek podle barevnyho
-
-                sensorManager.setLedStripColor(
-                    (data.colorR << 16) | (data.colorG << 8) | data.colorB, 
-                    data.ledStripTopBrightness
-                );
-
-                
-
-
-
-
-
-
-
-                break;
-            }
-
-            case MODE_GYRO:
-            case MODE_GAME_SNAKE:
-            case MODE_GAME_FLAPPY:
-            case MODE_2048:
-            case MODE_VZDALENOST:
-            case MODE_WIFI_SPOJENI:
-            case MODE_WIFI_DETECTION:
-            case MODE_SERVA:
-            case MODE_MOTOR:
-            case MODE_BAREVNY: {
-                sensorManager.readAllSensors();
-                break;
-            }
+        if (currentMode == MODE_SLEEP) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50)); // Prodleva v simulátoru
+        // Přečtení všech reálných senzorů
+        sensorManager.updateAllSensors();
+
+        SensorData data = globalState.getSensorData();
+
+        // 1. Znakový LCD 1602: Vždy zobrazuje aktuální teplotu a vlhkost na 1. řádku a vzdálenost na 2. řádku
+        String lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
+        String lcdLine2;
+        if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+            lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
+        } else if (data.irDistanceCm > 0) {
+            lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
+        } else if (data.ultrasonicDistanceCm > 0) {
+            lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
+        } else {
+            lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
+        }
+        sensorManager.writeLCD1602(lcdLine1, lcdLine2);
+
+        // 2. 7-segmentový displej: Zobrazuje vzdálenost v cm (Laser, případně IR dálkoměr nebo Ultrazvuk)
+        int segVal = -1;
+        if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+            segVal = data.laserDistanceMm / 10; // Přepočet mm na cm (0-200)
+        } else if (data.irDistanceCm > 0) {
+            segVal = (int)data.irDistanceCm;    // IR vzdálenost v cm (1-9)
+        } else if (data.ultrasonicDistanceCm > 0) {
+            segVal = (int)data.ultrasonicDistanceCm;
+        }
+        sensorManager.set7Segment(segVal);
+
+        // 3. WS2812B LED pásek: Živě kopíruje barvu z barevného senzoru TCS34725
+        uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
+        // Pokud senzor detekuje tmu / 0, dáme slabý orientační svit, jinak plnou detekovanou barvu
+        uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+        sensorManager.setLedStripColor(stripColor, stripBright);
+
+        // 4. Obsluha 3 indikačních LED nad senzory (D1 nad IR, D4 nad Ultrazvukem, D5 nad Laserem)
+        bool led_ir    = data.irObstacle; // Svítí, pokud IR2 detekuje překážku
+        bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f); // Svítí při překážce do 40 cm
+        bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300); // Svítí při objektu do 300 mm
+        sensorManager.setLeds(led_ir, led_ult, led_laser);
+
+        // 5. Periodický výpis všech senzorů na Serial Monitor (každou 1 sekundu)
+        unsigned long now = millis();
+        if (now - lastSerialPrint >= 1000) {
+            lastSerialPrint = now;
+            Serial.println("\n========== [TELEMETRIE HORNI PANEL] ==========");
+            Serial.printf("  DHT11:        Teplota: %.1f °C | Vlhkost: %.1f %%\n", data.temperature, data.humidity);
+            Serial.printf("  Laser VL53:   %d mm\n", data.laserDistanceMm);
+            Serial.printf("  Ultrazvuk:    %.1f cm\n", data.ultrasonicDistanceCm);
+            Serial.printf("  IR1 (vzdal.): %.1f cm (ADC2_CH9 GPIO 20 = %d)\n", data.irDistanceCm, analogRead(PIN_IR1));
+            Serial.printf("  IR2 (prekazka): %s (GPIO 38)\n", data.irObstacle ? "PREKAZKA!" : "CISTO");
+            Serial.printf("  LEDky nad senz: IR(D1)=%d | ULT(D4)=%d | LASER(D5)=%d\n", led_ir, led_ult, led_laser);
+            Serial.printf("  Fotorezistory: LDR1 (pin 1)=%d | LDR2 (pin 2)=%d\n", data.photo1, data.photo2);
+            Serial.printf("  Barevny TCS:  R=%d, G=%d, B=%d, Clear=%d\n", data.colorR, data.colorG, data.colorB, data.colorClear);
+            Serial.printf("  Uhy IMU:      Roll(X)=%.1f° | Pitch(Y)=%.1f° | Yaw(Z)=%.1f°\n",
+                          data.gyroX, data.gyroY, data.gyroZ);
+            Serial.printf("  Zrychleni:    Ax=%.2f g, Ay=%.2f g, Az=%.2f g\n",
+                          data.accelX, data.accelY, data.accelZ);
+            Serial.printf("  Tlacitko TOP: %s\n", data.btnTop ? "STISKNUTO" : "VOLNO");
+            Serial.println("================================================");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -726,10 +695,10 @@ void Task_Display_UI(void *pvParameters) {
                 static float lastAngleY = -999.0f;
                 static float lastAngleZ = -999.0f;
                 
-                // Výpočet úhlů z akcelerometru a gyroskopu
-                float pitch = atan2(-data.accelX, sqrt(data.accelY * data.accelY + data.accelZ * data.accelZ)) * 57.2957795f;
-                float roll  = atan2(data.accelY, data.accelZ) * 57.2957795f;
-                float yaw   = data.gyroZ; // Z rychlost otáčení
+                // Úhly bereme přímo z integrovaného komplementárního filtru
+                float pitch = data.gyroY; // Pitch (sklon dopředu/dozadu)
+                float roll  = data.gyroX; // Roll (náklon vlevo/vpravo)
+                float yaw   = data.gyroZ; // Yaw (otočení)
 
                 // A) STATICKÁ MASKA
                 if (needsFullRedraw) {
