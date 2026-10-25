@@ -299,9 +299,10 @@ bool setupUART() {
         delay(10);
     }
 
-    // 3. Spodní panel vůbec neodpověděl v časovém limitu
-    drawErrorScreen("DOLNI PANEL NEODPOVIDA!\nZkontroluj UART / napajeni.");
-    return false;
+    // 3. Spodní panel neodpověděl v časovém limitu -> neblokujeme systém, linka naskočí za běhu
+    Serial.println("[HANDSHAKE] Spodni panel zatim neodpovedel (UART se synchronizuje automaticky za behu).");
+    SerialESP.println("BOOT:START");
+    return true;
 #endif
     return true;
 }

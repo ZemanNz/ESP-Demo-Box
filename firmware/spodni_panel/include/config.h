@@ -13,7 +13,7 @@
 // =============================================================================
 
 #define ENABLE_OLED_SSD1306    // 0.96" OLED displej (I2C 0x3C, Adafruit_SSD1306)
-//#define ENABLE_UART_TOP      // UART komunikace s Horním panelem (Dočasně deaktivováno pro samostatný test)
+#define ENABLE_UART_TOP        // UART komunikace s Horním panelem (Serial1 křížem do horního ESP)
 #define ENABLE_JOYSTICK        // Analogový joystick (X, Y) a tlačítko (SW)
 #define ENABLE_POTENTIOMETER   // Analogový potenciometr
 #define ENABLE_ENCODER         // Rotační enkodér (CLK, DT)

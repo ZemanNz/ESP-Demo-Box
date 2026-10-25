@@ -182,27 +182,40 @@ void Task_UART(void *pvParameters) {
         // -------------------------------------------------------------
         // 2. PŘÍJEM (DOLNÍ -> HORNÍ PANEL)
         // -------------------------------------------------------------
-        
-        while (SerialESP.available() >= sizeof(BottomToTopPacket)) {
-            
-            // 2. KONTROLA ZAČÁTKU (Synchronizace):
-            // Funkce peek() se jen "podívá" na první bajt v bufferu, ale nesmaže ho
-            if (SerialESP.peek() != UART_FRAME_START_BOTTOM_TO_TOP) { // Není to 0x55?
-                SerialESP.read(); // Zahodíme 1 vadný bajt a zkusíme to v dalším kole znova
+        while (SerialESP.available() > 0) {
+            // Kontrola případné textové zprávy Handshake (BOOT:READY)
+            if (SerialESP.peek() == 'B') {
+                String line = SerialESP.readStringUntil('\n');
+                line.trim();
+                if (line == "BOOT:READY") {
+                    SerialESP.println("BOOT:START");
+                    Serial.println("[UART] Spodni panel poslal BOOT:READY -> odesilam BOOT:START!");
+                }
                 continue;
             }
-            // 3. PŘEČTENÍ CELÉHO PAKETU NARÁZ
-            // readBytes bleskově nasype všechny bajty přímo do naší struktury v paměti!
+
+            // Pokud nemáme ještě celý paket v bufferu, počkáme na další data
+            if (SerialESP.available() < sizeof(BottomToTopPacket)) {
+                break;
+            }
+
+            // Kontrola synchronizačního startovního bajtu 0x55
+            if (SerialESP.peek() != UART_FRAME_START_BOTTOM_TO_TOP) {
+                SerialESP.read(); // Zahodíme poškozený bajt a hledáme začátek
+                continue;
+            }
+
+            // Přečtení celého paketu naráz
             SerialESP.readBytes((uint8_t*)&inPacket, sizeof(BottomToTopPacket));
-            // 4. KONTROLA KONCE A KONTROLNÍHO SOUČTU
+
+            // Kontrola kontrolního součtu XOR
             uint8_t calculatedCRC = calculateChecksum(
                 (const uint8_t*)&inPacket, 
                 sizeof(BottomToTopPacket) - 2
             );
-            // Ověříme, že sedí koncový bajt (0xFE) i náš XOR checksum
+
             if (inPacket.endByte == UART_FRAME_END && inPacket.checksum == calculatedCRC) {
-                
-                // 5. DATA JSOU 100% V POŘÁDKU -> ZAPÍŠEME JE DO SYSTEMSTATE
+                // DATA JSOU V POŘÁDKU -> Uložíme do SystemState
                 globalState.updateJoystick(inPacket.joyX, inPacket.joyY, inPacket.joyBtn);
                 globalState.updateDownButtons(
                     inPacket.btnDown[0], inPacket.btnDown[1], 
@@ -217,9 +230,7 @@ void Task_UART(void *pvParameters) {
                 globalState.updateServo(inPacket.currentServoAngle);
                 globalState.updateMotor(inPacket.currentMotorSpeed);
                 globalState.updateContinuousServo(inPacket.currentContinuousServo);
-                
             } else {
-                // Pokud nesedí checksum (rušení na drátě), paket jednoduše ignorujeme
                 Serial.println("[UART] Chyba kontrolniho souctu! Paket zahozen.");
             }
         }
@@ -250,8 +261,8 @@ void Task_Sensors(void *pvParameters) {
         unsigned long now = millis();
         AppMode currentMode = globalState.getMode();
 
-        // Kontrola otočení rotačního enkodéru pro změnu módu
-        globalState.checkModeChange();
+        // Kontrola otočení rotačního enkodéru pro změnu módu - VYPNUTO pro zobrazení čistě Main Menu
+        // globalState.checkModeChange();
 
         if (currentMode == MODE_SLEEP) {
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -381,6 +392,10 @@ void Task_Sensors(void *pvParameters) {
             Serial.printf("  Otres / Tap:  %s (%.2f g)\n",
                           data.imuShock ? ">>> DRBNUTI DETEKOVANO! <<<" : "Klid", data.imuShockG);
             Serial.printf("  Tlacitko TOP: %s\n", data.btnTop ? "STISKNUTO" : "VOLNO");
+            Serial.printf("  Dolni panel (UART): Pot: %4d | Joy: X=%4d, Y=%4d, Btn=%d | Tlacitka: [%d %d %d %d %d] | Enc: %d\n",
+                          data.potentiometer, data.joyX, data.joyY, data.joyBtn,
+                          data.btnDown[0], data.btnDown[1], data.btnDown[2], data.btnDown[3], data.btnDown[4],
+                          data.encoderPos);
             Serial.println("================================================");
         }
 
@@ -411,7 +426,8 @@ void Task_Display_UI(void *pvParameters) {
         // ---------------------------------------------------------
         SensorData currentSensors = globalState.getSensorData();
 
-        // A) Enkodér pro procházení módů
+        // A) Enkodér pro procházení módů - dočasně vypnuto, držíme pouze Main Menu pro test UARTu
+        /*
         int32_t encDiff = currentSensors.encoderPos - lastEncoderPos;
         if (abs(encDiff) >= 4) {
             int step = (encDiff > 0) ? 1 : -1;
@@ -419,6 +435,13 @@ void Task_Display_UI(void *pvParameters) {
             globalState.setMode((AppMode)nextM);
             currentMode = (AppMode)nextM;
             lastEncoderPos = currentSensors.encoderPos;
+        }
+        */
+
+        // Vynutíme zobrazení pouze Hlavního menu (kromě režimu spánku)
+        if (currentMode != MODE_MAIN_MENU && currentMode != MODE_SLEEP) {
+            globalState.setMode(MODE_MAIN_MENU);
+            currentMode = MODE_MAIN_MENU;
         }
 
         // Horní fyzické tlačítko: Návrat do Menu nebo info
@@ -1612,7 +1635,13 @@ void setup() {
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
     xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 8192, NULL, 1, NULL, 0); // Core 0
-    xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0 (Simulátor dat a přepínání módů)
+    
+    // Simulátor UARTu vypnut – přepnuto na reálnou UART linku se spodním panelem
+    // xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0);
+    
+#ifdef ENABLE_UART_ESP
+    xTaskCreatePinnedToCore(Task_UART, "UART_Top", 4096, NULL, 2, NULL, 0); // Core 0 (Reálná UART komunikace se spodním panelem)
+#endif
     
     xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 8192, NULL, 1, NULL, 1); // Core 1
     xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 4096, NULL, 2, NULL, 1); // Core 1 (Priorita 2 pro presne casovani vzorkovani IMU)

@@ -264,6 +264,7 @@ bool waitForHandshakeWithTop(bool hardwareOk, const String& errorMsg) {
     // Hardware je OK -> posíláme BOOT:READY a čekáme na potvrzení BOOT:START
     SerialTop.flush();
     unsigned long lastSend = 0;
+    unsigned long startWait = millis();
 
     while (true) {
         unsigned long now = millis();
@@ -279,6 +280,13 @@ bool waitForHandshakeWithTop(bool hardwareOk, const String& errorMsg) {
                 Serial.println("[HANDSHAKE] Horni panel potvrdil start (BOOT:START)! Prechazim do provozu.");
                 return true;
             }
+        }
+
+        // Timeout 3.5s: pokud horní panel neodpovídá, spodní panel nezůstane navždy viset,
+        // ale začne autonomně fungovat a odesílat data přes UART
+        if (now - startWait >= 3500) {
+            Serial.println("[HANDSHAKE] Horni panel neodpovedel do 3.5s -> Spoustim autonomni provoz, UART bezi.");
+            return true;
         }
         delay(10);
     }

@@ -27,7 +27,7 @@
 #define ENABLE_LCD1602        // Znakový LCD displej 16x2 (I2C_0, 0x27)
 #define ENABLE_VL53L0X        // Laserový senzor vzdálenosti VL53L0X (I2C_0, 0x29)
 #define ENABLE_TCS34725       // Barevný RGB senzor TCS34725 (I2C_1, 0x29)
-//#define ENABLE_UART_ESP       // UART komunikace se spodním panelem (Serial1) - docasne vypnuto pro test horniho panelu
+#define ENABLE_UART_ESP       // UART komunikace se spodním panelem (Serial1)
 #define ENABLE_WIFI_WEB       // Wi-Fi a WebServer (SoftAP + Captive Portal + WebSocket)
 
 // Kompatibilita pro novější názvy modulů
