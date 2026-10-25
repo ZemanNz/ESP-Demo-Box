@@ -19,6 +19,11 @@ HardwareSerial SerialESP(1);
 #ifdef ENABLE_LSM6DS3
   #include <Adafruit_LSM6DS3.h>
   Adafruit_LSM6DS3 lsm6ds3;
+  // Hardwarové přerušení pro detekci drbnutí z gyroskopu LSM6DS3 (INT1)
+  volatile bool g_imuHwInterruptFired = false;
+  void IRAM_ATTR imuWakeupIsr() {
+      g_imuHwInterruptFired = true;
+  }
 #endif
 
 #ifdef ENABLE_VL53L0X
@@ -99,7 +104,8 @@ bool setupSensors() {
         drawErrorScreen("I2C_0 sbernice selhala!\n(SDA=" + String(I2C0_SDA) + ", SCL=" + String(I2C0_SCL) + ")");
         return false;
     }
-    Serial.println("[I2C_0] OK – Sbernice spustena.");
+    Wire.setClock(400000); // 400 kHz Fast I2C pro plynulé vyčítání gyroskopu a periferií
+    Serial.println("[I2C_0] OK – Sbernice spustena (400 kHz).");
 #endif
 
 #ifdef ENABLE_TCS34725
@@ -129,21 +135,25 @@ bool setupSensors() {
     }
 
     if (lsmOk) {
-        lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_250_DPS);
-        lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+        lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); // 500 DPS pro přesný a rychlý pohyb bez saturace
+        lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
+        lsm6ds3.setGyroDataRate(LSM6DS_RATE_104_HZ);
+        lsm6ds3.setAccelDataRate(LSM6DS_RATE_104_HZ);
         lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready
 
-        // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU ---
-        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission();
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(0x00); Wire.endTransmission();
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(0x01); Wire.endTransmission();
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission();
+        // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU (z config.h) ---
+        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: INTERRUPTS_ENABLE + SLOPE_FDS
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(IMU_WAKEUP_DUR); Wire.endTransmission(); // WAKE_UP_DUR: 0 ODR
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(IMU_WAKEUP_THS); Wire.endTransmission(); // WAKE_UP_THS: 0x02 = extra citlivé na prst
+        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission(); // MD1_CFG: INT1_WU (probuzení na pin INT1)
         
         #ifdef PIN_IMU_INT
             pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
+            attachInterrupt(digitalPinToInterrupt(PIN_IMU_INT), imuWakeupIsr, RISING);
         #endif
         
-        Serial.println("[LSM6DS3]    Probuzeni na INT1 aktivni.");
+        Serial.printf("[LSM6DS3]    Probuzeni na INT1 (GPIO %d) aktivni s prahem 0x%02X (~125 mg).\n",
+                      PIN_IMU_INT, IMU_WAKEUP_THS);
     }
 #endif
 

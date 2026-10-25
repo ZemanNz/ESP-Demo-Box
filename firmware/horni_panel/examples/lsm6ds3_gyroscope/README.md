@@ -24,6 +24,11 @@ V hlavní ukázce (`main.cpp`) je implementován **komplementární filtr** (Com
 
 Tyto přiložené soubory demonstrují výpočty probíhající přímo v hardwarovém koprocesoru senzoru LSM6DS3:
 
+*   **`test_gyro.cpp` (Kompletní maturitní test úhlů a drbnutí s displeji)**:
+    *   Samostatný interaktivní test horního panelu.
+    *   Obsahuje přesný komplementární filtr se svislou referencí pro víko kufru (otevírání/zavírání na $0.0^\circ$, otáčení na stole, boční náklon).
+    *   Živá vizualizace na **2.8" TFT ST7789** (čísla úhlů X, Y, Z + velký stavový banner drbnutí) i **LCD 1602**.
+    *   Hardwarový wake-up interrupt na pinu `PIN_IMU_INT` (GPIO 45) s nastavitelnou citlivostí 1 až 6 (tlačítkem na GPIO 47 nebo klávesnicí z PC).
 *   **`pedometer.cpp` (Krokoměr)**:
     *   Ukazuje spuštění integrovaného krokoměru a čtení počtu kroků z registru `readPedometer()` bez softwarového filtrování v ESP32.
 *   **`tap_detection.cpp` (Detekce poklepání)**:

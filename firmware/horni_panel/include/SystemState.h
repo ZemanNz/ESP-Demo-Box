@@ -44,6 +44,8 @@ struct SensorData {
     // --- Gyroskop a Akcelerometr (LSM6DS3) ---
     float accelX, accelY, accelZ;
     float gyroX, gyroY, gyroZ;
+    bool  imuShock;      // Detekce drbnutí / otřesu kufru
+    float imuShockG;     // Špičková síla otřesu v g
 
     // --- 2x Analogové fotorezistory ---
     uint16_t photo1;
@@ -383,7 +385,7 @@ public:
     }
 
     // IMU jednotka (LSM6DS3)
-    void updateIMU(float ax, float ay, float az, float gx, float gy, float gz) {
+    void updateIMU(float ax, float ay, float az, float gx, float gy, float gz, bool shock = false, float shockG = 1.0f) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             sensors.accelX = ax;
             sensors.accelY = ay;
@@ -391,6 +393,8 @@ public:
             sensors.gyroX = gx;
             sensors.gyroY = gy;
             sensors.gyroZ = gz;
+            sensors.imuShock = shock;
+            sensors.imuShockG = shockG;
             xSemaphoreGive(stateMutex);
         }
     }

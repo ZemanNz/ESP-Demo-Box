@@ -5,6 +5,7 @@
 #include "SensorManager.h"
 #include "UartProtocol.h"
 #include "esp_sleep.h"
+#include "esp_wifi.h"
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
@@ -30,6 +31,11 @@ void Task_WiFi_Web(void *pvParameters) {
     webManager.begin(&globalState);
 
     for (;;) {
+        AppMode currentMode = globalState.getMode();
+        if (currentMode == MODE_SLEEP) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         webManager.update();
         vTaskDelay(pdMS_TO_TICKS(15));
     }
@@ -49,6 +55,10 @@ void Task_UART_Simulator(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(50)); 
         
         AppMode current = globalState.getMode();
+        if (current == MODE_SLEEP) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         if (current != lastMode) {
             timeInMode = 0; // Uživatel ručně změnil mód (z webu nebo tlačítkem) -> resetujeme časovač!
             lastMode = current;
@@ -116,6 +126,12 @@ void Task_UART(void *pvParameters) {
     BottomToTopPacket inPacket;
 
     for (;;) {
+        AppMode currentMode = globalState.getMode();
+        if (currentMode == MODE_SLEEP) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
         unsigned long now = millis();
 
         // -------------------------------------------------------------
@@ -222,8 +238,16 @@ void Task_Sensors(void *pvParameters) {
     Serial.println(xPortGetCoreID());
 
     unsigned long lastSerialPrint = 0;
+    unsigned long lastOtherSensors = 0;
+    unsigned long lastUltrasonic = 0;
+    unsigned long lastLcdUpdate = 0;
+    unsigned long lastDhtUpdate = 0;
+
+    // Prvotní kalibrace gyroskopu po zapnutí
+    sensorManager.calibrateIMU();
 
     for (;;) {
+        unsigned long now = millis();
         AppMode currentMode = globalState.getMode();
 
         // Kontrola otočení rotačního enkodéru pro změnu módu
@@ -234,52 +258,113 @@ void Task_Sensors(void *pvParameters) {
             continue;
         }
 
-        // Přečtení všech reálných senzorů
-        sensorManager.updateAllSensors();
+        // -------------------------------------------------------------
+        // 1. NEJVYŠŠÍ PRIORITA: MĚŘENÍ A INTEGRACE GYROSKOPU LSM6DS3
+        // -------------------------------------------------------------
+        // Běží v každém 10ms cyklu (~100 Hz vzorkování) pro naprosto
+        // plynulou a přesnou numerickou integraci bez ztráty pohybu!
+        sensorManager.readIMU();
 
-        SensorData data = globalState.getSensorData();
+        // -------------------------------------------------------------
+        // 2. RYCHLÉ SENZORY A INDIKÁTORY (každých 40 ms = 25 Hz)
+        // -------------------------------------------------------------
+        if (now - lastOtherSensors >= 40) {
+            lastOtherSensors = now;
 
-        // 1. Znakový LCD 1602: Vždy zobrazuje aktuální teplotu a vlhkost na 1. řádku a vzdálenost na 2. řádku
-        String lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
-        String lcdLine2;
-        if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-            lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
-        } else if (data.irDistanceCm > 0) {
-            lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
-        } else if (data.ultrasonicDistanceCm > 0) {
-            lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
-        } else {
-            lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
+            sensorManager.readVL53L0X();
+            sensorManager.readIRDistance();
+            sensorManager.readIRObstacle();
+            sensorManager.readPhotoresistors();
+            sensorManager.readTopButton();
+            sensorManager.readColorSensor();
+
+            SensorData data = globalState.getSensorData();
+
+            // 7-segmentový displej: Zobrazuje vzdálenost v cm (Laser, IR, případně Ultrazvuk)
+            int segVal = -1;
+            if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+                segVal = data.laserDistanceMm / 10; // Přepočet mm na cm (0-200)
+            } else if (data.irDistanceCm > 0) {
+                segVal = (int)data.irDistanceCm;    // IR vzdálenost v cm (1-9)
+            } else if (data.ultrasonicDistanceCm > 0) {
+                segVal = (int)data.ultrasonicDistanceCm;
+            }
+            sensorManager.set7Segment(segVal);
+
+            // WS2812B LED pásek: Živě kopíruje barvu z barevného senzoru TCS34725
+            uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
+            uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+            sensorManager.setLedStripColor(stripColor, stripBright);
+
+            // 3x LEDky nad senzory (D1 nad IR, D4 nad Ultrazvukem, D5 nad Laserem)
+            bool led_ir    = data.irObstacle;
+            bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
+            bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
+            sensorManager.setLeds(led_ir, led_ult, led_laser);
         }
-        sensorManager.writeLCD1602(lcdLine1, lcdLine2);
 
-        // 2. 7-segmentový displej: Zobrazuje vzdálenost v cm (Laser, případně IR dálkoměr nebo Ultrazvuk)
-        int segVal = -1;
-        if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-            segVal = data.laserDistanceMm / 10; // Přepočet mm na cm (0-200)
-        } else if (data.irDistanceCm > 0) {
-            segVal = (int)data.irDistanceCm;    // IR vzdálenost v cm (1-9)
-        } else if (data.ultrasonicDistanceCm > 0) {
-            segVal = (int)data.ultrasonicDistanceCm;
+        // -------------------------------------------------------------
+        // 3. ULTRAZVUK HC-SR04 (každých 100 ms = 10 Hz)
+        // -------------------------------------------------------------
+        if (now - lastUltrasonic >= 100) {
+            lastUltrasonic = now;
+            sensorManager.readUltrasonic();
         }
-        sensorManager.set7Segment(segVal);
 
-        // 3. WS2812B LED pásek: Živě kopíruje barvu z barevného senzoru TCS34725
-        uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-        // Pokud senzor detekuje tmu / 0, dáme slabý orientační svit, jinak plnou detekovanou barvu
-        uint8_t stripBright = (stripColor == 0) ? 20 : 80;
-        sensorManager.setLedStripColor(stripColor, stripBright);
+        // -------------------------------------------------------------
+        // 4. ZNAKOVÝ LCD 1602 DISPLEJ (každých 250 ms = 4 Hz)
+        // -------------------------------------------------------------
+        if (now - lastLcdUpdate >= 250) {
+            lastLcdUpdate = now;
+            SensorData data = globalState.getSensorData();
+            String lcdLine1;
+            String lcdLine2;
 
-        // 4. Obsluha 3 indikačních LED nad senzory (D1 nad IR, D4 nad Ultrazvukem, D5 nad Laserem)
-        bool led_ir    = data.irObstacle; // Svítí, pokud IR2 detekuje překážku
-        bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f); // Svítí při překážce do 40 cm
-        bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300); // Svítí při objektu do 300 mm
-        sensorManager.setLeds(led_ir, led_ult, led_laser);
+            if (currentMode == MODE_GYRO) {
+                // V režimu Gyroskop zobrazujeme na LCD 1602 osy a stav drbnutí
+                char l1[17], l2[17];
+                snprintf(l1, sizeof(l1), "X:%+5.1f Y:%+5.1f", data.gyroX, data.gyroY);
+                if (data.imuShock) {
+                    snprintf(l2, sizeof(l2), "!DRBNUTI!  %3.1fg", data.imuShockG);
+                } else {
+                    snprintf(l2, sizeof(l2), "Z:%+5.1f  [KLID]", data.gyroZ);
+                }
+                lcdLine1 = String(l1);
+                lcdLine2 = String(l2);
+            } else {
+                // V ostatních režimech zobrazujeme teplotu a vzdálenost
+                lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
+                if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+                    lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
+                } else if (data.irDistanceCm > 0) {
+                    lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
+                } else if (data.ultrasonicDistanceCm > 0) {
+                    lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
+                } else {
+                    lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
+                }
+            }
+            sensorManager.writeLCD1602(lcdLine1, lcdLine2);
+        }
 
-        // 5. Periodický výpis všech senzorů na Serial Monitor (každou 1 sekundu)
-        unsigned long now = millis();
+        // -------------------------------------------------------------
+        // 5. TEPLOTA A VLHKOST DHT11 (každých 1500 ms)
+        // -------------------------------------------------------------
+        if (now - lastDhtUpdate >= 1500) {
+            lastDhtUpdate = now;
+            sensorManager.readDHT();
+        }
+
+        // -------------------------------------------------------------
+        // 6. PERIODICKÝ VÝPIS TELEMETRIE NA SÉRIOVÝ MONITOR (každých 1000 ms)
+        // -------------------------------------------------------------
         if (now - lastSerialPrint >= 1000) {
             lastSerialPrint = now;
+            SensorData data = globalState.getSensorData();
+            bool led_ir    = data.irObstacle;
+            bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
+            bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
+
             Serial.println("\n========== [TELEMETRIE HORNI PANEL] ==========");
             Serial.printf("  DHT11:        Teplota: %.1f °C | Vlhkost: %.1f %%\n", data.temperature, data.humidity);
             Serial.printf("  Laser VL53:   %d mm\n", data.laserDistanceMm);
@@ -293,11 +378,13 @@ void Task_Sensors(void *pvParameters) {
                           data.gyroX, data.gyroY, data.gyroZ);
             Serial.printf("  Zrychleni:    Ax=%.2f g, Ay=%.2f g, Az=%.2f g\n",
                           data.accelX, data.accelY, data.accelZ);
+            Serial.printf("  Otres / Tap:  %s (%.2f g)\n",
+                          data.imuShock ? ">>> DRBNUTI DETEKOVANO! <<<" : "Klid", data.imuShockG);
             Serial.printf("  Tlacitko TOP: %s\n", data.btnTop ? "STISKNUTO" : "VOLNO");
             Serial.println("================================================");
         }
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10)); // 10 ms takt pro rychlou integraci gyroskopu
     }
 }
 
@@ -357,12 +444,11 @@ void Task_Display_UI(void *pvParameters) {
             
             // =======================================================
             case MODE_SLEEP: {
-                Serial.println("[SYSTEM] Prechazim do rezimu Light Sleep...");
+                Serial.println("\n[SYSTEM] Pozadavek na rezim Light Sleep...");
 
-
-                // 1. Zhasneme displej a vypneme jeho podsvícení
+                // 1. Zhasneme TFT displej a vypneme jeho podsvícení
                 gfx.clearScreen(ST77XX_BLACK);
-                #ifdef PIN_TFT_LED
+                #if defined(PIN_TFT_LED) && (PIN_TFT_LED >= 0)
                     digitalWrite(PIN_TFT_LED, LOW);
                 #endif
 
@@ -392,50 +478,125 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setLCDBacklight(false);
                 #endif
 
-                // 7. Vyprázdníme sériové buffery před uspáním
+                // 7. Vyčkáme na uvolnění horního tlačítka!
+                // (Uživatel ho před chvílí 1s držel pro uspání, takže pin 47 je v této chvíli stále LOW.
+                // Kdybychom hned povolili wake-up na LOW úroveň, procesor by se v tu stejnou mikrosekundu okamžitě probudil!)
+                Serial.println("[SYSTEM] Cekam na uvolneni tlacitka TOP...");
+                unsigned long waitBtn = millis();
+                #ifdef PIN_BTN1
+                while (digitalRead(PIN_BTN1) == LOW && (millis() - waitBtn < 3000)) {
+                    vTaskDelay(pdMS_TO_TICKS(40));
+                }
+                #endif
+                vTaskDelay(pdMS_TO_TICKS(200)); // Debounce prodleva pro naprostý klid kontaktů
+
+                // 8. Uvedeme přerušení gyroskopu LSM6DS3 do klidu:
+                // Při mačkání tlačítka nebo držení kufru došlo k pohybu, takže pin INT1 (GPIO 45)
+                // mohl sepnout do HIGH. Přečtením registru 0x1B (WAKE_UP_SRC) vyčistíme příznak a shodíme pin do LOW.
+                #ifdef ENABLE_LSM6DS3
+                Wire.beginTransmission(0x6B);
+                Wire.write(0x1B);
+                Wire.endTransmission(false);
+                Wire.requestFrom((uint8_t)0x6B, (uint8_t)1);
+                if (Wire.available()) Wire.read();
+
+                Wire.beginTransmission(0x6A);
+                Wire.write(0x1B);
+                Wire.endTransmission(false);
+                Wire.requestFrom((uint8_t)0x6A, (uint8_t)1);
+                if (Wire.available()) Wire.read();
+
+                #ifdef PIN_IMU_INT
+                int gyroClearTries = 10;
+                while (digitalRead(PIN_IMU_INT) == HIGH && gyroClearTries-- > 0) {
+                    Wire.beginTransmission(0x6B);
+                    Wire.write(0x1B);
+                    Wire.endTransmission(false);
+                    Wire.requestFrom((uint8_t)0x6B, (uint8_t)1);
+                    if (Wire.available()) Wire.read();
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                #endif
+                #endif
+
+                // 9. Vypneme Wi-Fi rádio před spánkem (běžící Wi-Fi AP by periodicky budil light sleep)
+                #ifdef ENABLE_WIFI_WEB
+                esp_wifi_stop();
+                vTaskDelay(pdMS_TO_TICKS(50));
+                #endif
+
+                // 10. Vyprázdníme sériové buffery
+                Serial.println("[SYSTEM] Vstupuji do Light Sleep (probuzeni tuknutim prstem do kufru nebo stiskem tlacitka)...");
                 Serial.flush();
                 #ifdef ENABLE_UART_ESP
                     SerialESP.flush();
                 #endif
 
-                // 8. Nastavení všech 3 hardwarových zdrojů probuzení:
-                // A) Horní tlačítko 1 (stisk spojí na GND = LOW)
+                // 11. Nastavení hardwarových zdrojů probuzení:
+                // A) Horní tlačítko (stisk spojí na GND = LOW úroveň)
                 #ifdef PIN_BTN1
                     gpio_wakeup_enable((gpio_num_t)PIN_BTN1, GPIO_INTR_LOW_LEVEL);
                 #endif
 
-                // B) Akcelerometr LSM6DS3 (INT1 na GPIO 45 – impuls HIGH při otřesu/klepnutí)
+                // B) Gyroskop LSM6DS3 (INT1 – puls HIGH při otřesu/ťuknutí prstem)
                 #ifdef PIN_IMU_INT
                     gpio_wakeup_enable((gpio_num_t)PIN_IMU_INT, GPIO_INTR_HIGH_LEVEL);
                 #endif
 
-                // Povolení GPIO probuzení (tlačítko + akcelerometr)
                 esp_sleep_enable_gpio_wakeup();
 
-                // C) UART z dolního panelu (UART1 – jakákoliv aktivita zdola)
                 #ifdef ENABLE_UART_ESP
                     esp_sleep_enable_uart_wakeup(1);
                 #endif
 
-                // 9. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
-                // (Procesor zastaví hodiny, minimální odběr proudu, RAM zůstává plně zachována)
+                // 12. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
                 esp_light_sleep_start();
 
                 // ===================================================
-                // 10. PROBUZENÍ! (Kód pokračuje okamžitě zde)
+                // 13. PROBUZENÍ! (Kód pokračuje okamžitě zde)
                 // ===================================================
-                #ifdef PIN_TFT_LED
-                    digitalWrite(PIN_TFT_LED, HIGH); // Znovu rozsvítíme podsvícení displeje
+                // Okamžitě deaktivujeme wake-up, aby se neopakovalo
+                esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+                #ifdef PIN_BTN1
+                    gpio_wakeup_disable((gpio_num_t)PIN_BTN1);
+                #endif
+                #ifdef PIN_IMU_INT
+                    gpio_wakeup_disable((gpio_num_t)PIN_IMU_INT);
+                #endif
+
+                // Pokud byl probuzen tlačítkem, počkáme na jeho uvolnění, aby neprokliklo v Menu
+                #ifdef PIN_BTN1
+                while (digitalRead(PIN_BTN1) == LOW) {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+                #endif
+
+                // Znovu zapneme Wi-Fi
+                #ifdef ENABLE_WIFI_WEB
+                esp_wifi_start();
+                #endif
+
+                #if defined(PIN_TFT_LED) && (PIN_TFT_LED >= 0)
+                    digitalWrite(PIN_TFT_LED, HIGH);
                 #endif
 
                 #ifdef ENABLE_LCD1602
-                    sensorManager.setLCDBacklight(true); // Znovu rozsvítíme LCD 1602
+                    sensorManager.setLCDBacklight(true);
                 #endif
 
                 esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
-                Serial.printf("[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
+                Serial.printf("\n[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
                 if (duvod == ESP_SLEEP_WAKEUP_GPIO) {
-                    Serial.println("PROBUZENO TLACITKEM NEBO OTRESEM (GPIO)");
+                    #ifdef PIN_IMU_INT
+                    if (digitalRead(PIN_IMU_INT) == HIGH) {
+                        Serial.println("PROBUZENO OTRESEM / TUKNUTIM DO KUFROVEHO GYROSKOPU!");
+                    } else {
+                        Serial.println("PROBUZENO STISKEM HORNÍHO TLACITKA (GPIO)!");
+                    }
+                    #else
+                    Serial.println("PROBUZENO Z GPIO!");
+                    #endif
                 } else if (duvod == ESP_SLEEP_WAKEUP_UART) {
                     Serial.println("PROBUZENO Z DOLNIHO PANELU (UART)");
                 } else {
@@ -445,12 +606,8 @@ void Task_Display_UI(void *pvParameters) {
                 // Krátká prodleva na stabilizaci po probuzení
                 vTaskDelay(pdMS_TO_TICKS(100));
 
-                // Vrátíme se do předchozího módu (pokud byl předchozí mód na konci demo cyklu, začneme od Menu)
-                AppMode returnMode = globalState.getLastMode();
-                if (returnMode == MODE_SLEEP || returnMode == MODE_BAREVNY) {
-                    returnMode = MODE_MAIN_MENU;
-                }
-                globalState.setMode(returnMode);
+                // Vrátíme se do Hlavního Menu
+                globalState.setMode(MODE_MAIN_MENU);
                 break;
             }
 
@@ -458,8 +615,7 @@ void Task_Display_UI(void *pvParameters) {
             case MODE_MAIN_MENU: {
                 delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
                 bool isInfo = globalState.isInfoActive();
-                isInfo = true;
-
+                
                 if (isInfo) {
                     if (needsFullRedraw) {
                         // INFO OVERLAY pro Hlavní menu
@@ -689,22 +845,24 @@ void Task_Display_UI(void *pvParameters) {
             // MÓD: GYROSKOP / IMU 3D OSY (Návrh 2)
             // =======================================================
             case MODE_GYRO: {
-                delay = 50; // 20 fps
+                delay = 40; // 25 fps
                 SensorData data = globalState.getSensorData();
                 static float lastAngleX = -999.0f;
                 static float lastAngleY = -999.0f;
                 static float lastAngleZ = -999.0f;
+                static bool lastShock = false;
                 
-                // Úhly bereme přímo z integrovaného komplementárního filtru
-                float pitch = data.gyroY; // Pitch (sklon dopředu/dozadu)
-                float roll  = data.gyroX; // Roll (náklon vlevo/vpravo)
-                float yaw   = data.gyroZ; // Yaw (otočení)
+                // Relativní úhly natočení kufru v jednotlivých osách [stupně]
+                float angX = data.gyroX; // Osa X (naklopení)
+                float angY = data.gyroY; // Osa Y (otočení)
+                float angZ = data.gyroZ; // Osa Z (náklon do stran)
 
-                // A) STATICKÁ MASKA
+                // A) STATICKÁ MASKA (překreslení rámu a popisků při přepnutí obrazovky)
                 if (needsFullRedraw) {
                     lastAngleX = -999.0f;
                     lastAngleY = -999.0f;
                     lastAngleZ = -999.0f;
+                    lastShock = !data.imuShock;
 
                     // Levý panel (oranžovo-béžový 0xFED7, přesně 0 až 119 px)
                     gfx.fillRect(0, 0, 120, 240, 0xFED7);
@@ -713,9 +871,9 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.drawTextPartial(12, 18, "GYROSKOP", ST77XX_BLACK, 0xFED7, 2);
                     
                     // Popisky os
-                    gfx.drawTextPartial(8, 75, "X:", ST77XX_BLACK, 0xFED7, 2);
-                    gfx.drawTextPartial(8, 125, "Y:", ST77XX_BLACK, 0xFED7, 2);
-                    gfx.drawTextPartial(8, 175, "Z:", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.drawTextPartial(8, 70, "X:", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.drawTextPartial(8, 115, "Y:", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.drawTextPartial(8, 160, "Z:", ST77XX_BLACK, 0xFED7, 2);
 
                     // Pravý panel (čistě bílý, 121 až 319 px)
                     gfx.fillRect(121, 0, 199, 240, ST77XX_WHITE);
@@ -725,21 +883,21 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.drawLine(120, 0, 120, 239, ST77XX_BLACK);
                 }
 
-                // B) DYNAMICKÁ ČÁST (Pouze při změně)
-                if (needsFullRedraw || abs(pitch - lastAngleX) > 0.5f || abs(roll - lastAngleY) > 0.5f || abs(yaw - lastAngleZ) > 0.5f) {
-                    lastAngleX = pitch;
-                    lastAngleY = roll;
-                    lastAngleZ = yaw;
+                // B) DYNAMICKÁ ČÁST (Pouze při změně o více než 0.4 stupně)
+                if (needsFullRedraw || abs(angX - lastAngleX) > 0.4f || abs(angY - lastAngleY) > 0.4f || abs(angZ - lastAngleZ) > 0.4f) {
+                    lastAngleX = angX;
+                    lastAngleY = angY;
+                    lastAngleZ = angZ;
 
                     // 1. Čísla na levém panelu (vymezený obdélník, nepřeteče přes X=120)
-                    gfx.fillRect(30, 72, 88, 22, 0xFED7);
-                    gfx.drawTextPartial(32, 75, String(pitch, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.fillRect(30, 67, 88, 22, 0xFED7);
+                    gfx.drawTextPartial(32, 70, String(angX, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
 
-                    gfx.fillRect(30, 122, 88, 22, 0xFED7);
-                    gfx.drawTextPartial(32, 125, String(roll, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.fillRect(30, 112, 88, 22, 0xFED7);
+                    gfx.drawTextPartial(32, 115, String(angY, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
 
-                    gfx.fillRect(30, 172, 88, 22, 0xFED7);
-                    gfx.drawTextPartial(32, 175, String(yaw, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
+                    gfx.fillRect(30, 157, 88, 22, 0xFED7);
+                    gfx.drawTextPartial(32, 160, String(angZ, 1) + "o", ST77XX_BLACK, 0xFED7, 2);
 
                     // Vždy čistě obnovíme předělovou čáru
                     gfx.drawLine(120, 0, 120, 239, ST77XX_BLACK);
@@ -748,32 +906,49 @@ void Task_Display_UI(void *pvParameters) {
                     int cx = 220, cy = 135;
                     gfx.fillRect(121, 1, 198, 238, ST77XX_WHITE); // Smazání pravého plátna
                     
-                    // Rotace šipek podle úhlů náklonu
-                    float radRoll = roll * 0.0174532925f;
-                    
-                    // A) Modrá šipka (Osa Z - ve výchozím stavu NEJVĚTŠÍ a směřuje přímo NAHORU)
+                    // A) Modrá šipka (Osa Z - ve výchozím stavu míří NAHORU, rotuje s angZ)
                     int zLen = 75;
-                    int zx = cx - (int)(zLen * sin(radRoll));
-                    int zy = cy - (int)(zLen * cos(radRoll));
-                    gfx.drawArrow(cx, cy, zx, zy, 15, 0x039F); // Modrá
+                    float radZ = (90.0f - angZ) * 0.0174532925f;
+                    int zx = cx + (int)(zLen * cos(radZ));
+                    int zy = cy - (int)(zLen * sin(radZ));
+                    gfx.drawArrow(cx, cy, zx, zy, 15, 0x039F); // Modrá Z
                     
-                    // B) Červená šipka (Osa X - ve výchozím stavu šikmo VLEVO DOLŮ 145 deg)
+                    // B) Červená šipka (Osa X - ve výchozím stavu šikmo VLEVO DOLŮ 145 deg, rotuje s angX)
                     int xLen = 58;
-                    float radX = (145.0f + roll) * 0.0174532925f;
+                    float radX = (145.0f + angX) * 0.0174532925f;
                     int xx = cx + (int)(xLen * cos(radX));
                     int xy = cy + (int)(xLen * sin(radX));
-                    gfx.drawArrow(cx, cy, xx, xy, 14, 0xE986); // Červená
+                    gfx.drawArrow(cx, cy, xx, xy, 14, 0xE986); // Červená X
 
-                    // C) Zelená šipka (Osa Y - ve výchozím stavu šikmo VPRAVO DOLŮ 35 deg - ukazují od sebe)
+                    // C) Zelená šipka (Osa Y - ve výchozím stavu šikmo VPRAVO DOLŮ 35 deg, rotuje s angY)
                     int yLen = 58;
-                    float radY = (35.0f + roll) * 0.0174532925f;
+                    float radY = (35.0f - angY) * 0.0174532925f;
                     int yx = cx + (int)(yLen * cos(radY));
                     int yy = cy + (int)(yLen * sin(radY));
-                    gfx.drawArrow(cx, cy, yx, yy, 14, 0x2444); // Zelená
+                    gfx.drawArrow(cx, cy, yx, yy, 14, 0x2444); // Zelená Y
 
                     // Středový černý pivot
                     gfx.fillCircle(cx, cy, 10, 0x2124);
                     gfx.drawCircle(cx, cy, 10, ST77XX_BLACK);
+                }
+
+                // C) DETEKCE DRBNUTÍ / OTŘESU (v levém panelu dole Y: 194 až 234)
+                if (needsFullRedraw || data.imuShock != lastShock) {
+                    lastShock = data.imuShock;
+                    if (data.imuShock) {
+                        gfx.fillRect(4, 194, 112, 40, ST77XX_RED);
+                        gfx.drawRect(4, 194, 112, 40, ST77XX_WHITE);
+                        gfx.drawTextPartial(8, 199, "! DRBNUTI !", ST77XX_WHITE, ST77XX_RED, 1);
+                        char bufG[18];
+                        snprintf(bufG, sizeof(bufG), "Sila: %.2fg", data.imuShockG);
+                        gfx.drawTextPartial(12, 217, bufG, ST77XX_YELLOW, ST77XX_RED, 1);
+                    } else {
+                        gfx.fillRect(4, 194, 112, 40, 0x1AE4); // Tmavě tyrkysová
+                        gfx.drawRect(4, 194, 112, 40, ST77XX_BLACK);
+                        gfx.drawTextPartial(14, 199, "STAV: KLID", ST77XX_WHITE, 0x1AE4, 1);
+                        gfx.drawTextPartial(8, 217, "Citl: 1 (125mg)", 0xCE59, 0x1AE4, 1);
+                    }
+                    gfx.drawLine(120, 194, 120, 239, ST77XX_BLACK);
                 }
                 break;
             }
@@ -1440,7 +1615,7 @@ void setup() {
     xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0); // Core 0 (Simulátor dat a přepínání módů)
     
     xTaskCreatePinnedToCore(Task_Display_UI, "Display_UI", 8192, NULL, 1, NULL, 1); // Core 1
-    xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 4096, NULL, 1, NULL, 1); // Core 1
+    xTaskCreatePinnedToCore(Task_Sensors, "Sensors", 4096, NULL, 2, NULL, 1); // Core 1 (Priorita 2 pro presne casovani vzorkovani IMU)
 
     Serial.println("Vsechna vlakna spustena!");
 }

@@ -26,6 +26,7 @@ public:
     // Gyroskop a akcelerometr
     void calibrateIMU();
     void readIMU();
+    void resetIMUAngles(float x = 0.0f, float y = 0.0f, float z = 0.0f);
 
     // Hromadné přečtení všech senzorů
     void updateAllSensors();
@@ -74,13 +75,18 @@ private:
     uint32_t topBtnPressStartTime = 0;
     bool topBtnLongPressHandled = false;
 
-    // Komplementární filtr pro IMU (LSM6DS3)
+    // Stav pro komplementární filtr a integraci IMU (LSM6DS3)
     float imuAngleX = 0.0f;
     float imuAngleY = 0.0f;
     float imuAngleZ = 0.0f;
     float gyroBiasX = 0.0f;
     float gyroBiasY = 0.0f;
     float gyroBiasZ = 0.0f;
+    float accelInitAngleX = 0.0f;
+    float accelInitAngleZ = 0.0f;
+    float lastGx = 0.0f;
+    float lastGy = 0.0f;
+    float lastGz = 0.0f;
     bool imuCalibrated = false;
     unsigned long lastImuTimeUs = 0;
 };

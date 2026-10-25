@@ -1,5 +1,7 @@
 #include "SensorManager.h"
 #include "HardwareSetup.h"
+
+extern volatile bool g_imuHwInterruptFired;
 #include <Wire.h>
 
 // Externí instance senzorů a periferií definované v HardwareSetup.cpp
@@ -63,7 +65,8 @@ void SensorManager::readUltrasonic() {
     delayMicroseconds(10);
     digitalWrite(PIN_ULTRASONIC_TRIG, LOW);
     
-    long duration = pulseIn(PIN_ULTRASONIC_ECHO, HIGH, 30000UL);
+    // Timeout snížen na 12000 us (~205 cm), aby se task nezasekával při volném prostoru
+    long duration = pulseIn(PIN_ULTRASONIC_ECHO, HIGH, 12000UL);
     float distCm = (duration == 0) ? -1.0f : (duration * 0.0343f / 2.0f);
     globalState.updateUltrasonicDistance(distCm);
 #endif
@@ -187,40 +190,79 @@ void SensorManager::readColorSensor() {
 }
 
 // =============================================================================
-// KALIBRACE GYROSKOPU LSM6DS3 (přesně podle examples/lsm6ds3_gyroscope/main.cpp)
+// KALIBRACE GYROSKOPU LSM6DS3 (odstranění offsetu/šumu v klidu + nulování gravitačního náklonu)
 // =============================================================================
 void SensorManager::calibrateIMU() {
 #ifdef ENABLE_LSM6DS3
-    Serial.println("\n[LSM6DS3] Kalibrace gyroskopu... Uvedte panel do klidu (2 sekundy).");
-    float sumX = 0, sumY = 0, sumZ = 0;
-    const int numSamples = 200;
+    Serial.println("\n[LSM6DS3] Zahajuji kalibraci IMU... Drzte kufr v klidu (1.5 sekundy).");
+    delay(200);
+    float sumGx = 0.0f, sumGy = 0.0f, sumGz = 0.0f;
+    float sumAx = 0.0f, sumAy = 0.0f, sumAz = 0.0f;
+    const int numSamples = 150;
 
     for (int i = 0; i < numSamples; i++) {
         sensors_event_t accel, gyro, temp;
         lsm6ds3.getEvent(&accel, &gyro, &temp);
-        sumX += gyro.gyro.x;
-        sumY += gyro.gyro.y;
-        sumZ += gyro.gyro.z;
+        // gyro.gyro.* je v rad/s -> převod na deg/s pro kalibraci v dps
+        sumGx += gyro.gyro.x * (float)RAD_TO_DEG;
+        sumGy += gyro.gyro.y * (float)RAD_TO_DEG;
+        sumGz += gyro.gyro.z * (float)RAD_TO_DEG;
+        sumAx += accel.acceleration.x / 9.80665f;
+        sumAy += accel.acceleration.y / 9.80665f;
+        sumAz += accel.acceleration.z / 9.80665f;
         delay(10);
     }
 
-    gyroBiasX = sumX / numSamples;
-    gyroBiasY = sumY / numSamples;
-    gyroBiasZ = sumZ / numSamples;
+    gyroBiasX = sumGx / (float)numSamples;
+    gyroBiasY = sumGy / (float)numSamples;
+    gyroBiasZ = sumGz / (float)numSamples;
+
+    float initAx = sumAx / (float)numSamples;
+    float initAy = sumAy / (float)numSamples;
+    float initAz = sumAz / (float)numSamples;
+
+    // Počáteční klidový sklon víka vůči gravitaci (referenční nula = 0.0°)
+    accelInitAngleX = atan2f(initAz, -initAy) * (float)RAD_TO_DEG;
+    accelInitAngleZ = atan2f(initAx, -initAy) * (float)RAD_TO_DEG;
 
     // Počáteční úhly: relativní natočení od startu je přesně 0.0°
     imuAngleX = 0.0f;
     imuAngleY = 0.0f;
     imuAngleZ = 0.0f;
-    imuCalibrated = true;
+    lastGx = 0.0f;
+    lastGy = 0.0f;
+    lastGz = 0.0f;
     lastImuTimeUs = micros();
+    imuCalibrated = true;
 
-    Serial.printf("[LSM6DS3] Kalibrace dokoncena! Bias: X=%.4f Y=%.4f Z=%.4f (rad/s)\n\n",
-                  gyroBiasX, gyroBiasY, gyroBiasZ);
+    Serial.printf("[LSM6DS3] Kalibrace hotova!\n");
+    Serial.printf("  Gyro Bias (deg/s):  X=%.2f | Y=%.2f | Z=%.2f\n", gyroBiasX, gyroBiasY, gyroBiasZ);
+    Serial.printf("  Klidovy sklon (deg): X=%.1f° | Z=%.1f°\n\n", accelInitAngleX, accelInitAngleZ);
 #endif
 }
 
-// Čtení a integrace gyroskopu přesně podle examples/lsm6ds3_gyroscope/main.cpp
+void SensorManager::resetIMUAngles(float x, float y, float z) {
+#ifdef ENABLE_LSM6DS3
+    sensors_event_t accel, gyro, temp;
+    lsm6ds3.getEvent(&accel, &gyro, &temp);
+    float ax = accel.acceleration.x / 9.80665f;
+    float ay = accel.acceleration.y / 9.80665f;
+    float az = accel.acceleration.z / 9.80665f;
+
+    accelInitAngleX = (atan2f(az, -ay) * (float)RAD_TO_DEG) - x;
+    accelInitAngleZ = (atan2f(ax, -ay) * (float)RAD_TO_DEG) - z;
+
+    imuAngleX = x;
+    imuAngleY = y;
+    imuAngleZ = z;
+    lastGx = 0.0f;
+    lastGy = 0.0f;
+    lastGz = 0.0f;
+    lastImuTimeUs = micros();
+#endif
+}
+
+// Čtení a komplementární filtr s gravitační korekcí pro svislý horní panel
 void SensorManager::readIMU() {
 #ifdef ENABLE_LSM6DS3
     if (!imuCalibrated) {
@@ -228,41 +270,93 @@ void SensorManager::readIMU() {
         return;
     }
 
-    // 1. Přesný časový krok dt v sekundách
+    // 1. Přesný časový krok dt v sekundách z mikrosekund procesoru
     unsigned long nowMicros = micros();
     float dt = (float)(nowMicros - lastImuTimeUs) / 1000000.0f;
     lastImuTimeUs = nowMicros;
-    if (dt > 0.1f) dt = 0.01f;
+
+    // Ochrana před velkým skokem po blokující operaci (např. připojování Wi-Fi)
+    if (dt <= 0.0f || dt > 0.15f) {
+        lastGx = 0.0f;
+        lastGy = 0.0f;
+        lastGz = 0.0f;
+        return;
+    }
 
     // 2. Načtení dat ze senzoru LSM6DS3
     sensors_event_t accel, gyro, temp;
     lsm6ds3.getEvent(&accel, &gyro, &temp);
 
-    // 3. Odečtení kalibrovaného klidového biasu
-    float rawGyroX = gyro.gyro.x - gyroBiasX;
-    float rawGyroY = gyro.gyro.y - gyroBiasY;
-    float rawGyroZ = gyro.gyro.z - gyroBiasZ;
+    // 3. Přepočet úhlové rychlosti z rad/s na deg/s (stupně za sekundu)
+    float gx = (gyro.gyro.x * (float)RAD_TO_DEG) - gyroBiasX;
+    float gy = (gyro.gyro.y * (float)RAD_TO_DEG) - gyroBiasY;
+    float gz = (gyro.gyro.z * (float)RAD_TO_DEG) - gyroBiasZ;
 
-    // 4. Mrtvé pásmo šumu (GYRO_DEADZONE = 0.03 rad/s)
-    const float GYRO_DEADZONE = 0.03f;
-    if (fabsf(rawGyroX) < GYRO_DEADZONE) rawGyroX = 0.0f;
-    if (fabsf(rawGyroY) < GYRO_DEADZONE) rawGyroY = 0.0f;
-    if (fabsf(rawGyroZ) < GYRO_DEADZONE) rawGyroZ = 0.0f;
+    // 4. Jemný klidový filtr (0.20 deg/s) - zamezí driftu na stole,
+    //    ale zachytí i ten nejpomalejší pohyb ruky
+    const float STILL_THRESHOLD = 0.20f; // stupňů za sekundu
+    if (fabsf(gx) < STILL_THRESHOLD) gx = 0.0f;
+    if (fabsf(gy) < STILL_THRESHOLD) gy = 0.0f;
+    if (fabsf(gz) < STILL_THRESHOLD) gz = 0.0f;
 
-    // 5. Přepočet úhlové rychlosti z rad/s na stupně/s
-    const float RAD_TO_DEG_CONST = 57.295779513f;
-    float gyroDegSecX = rawGyroX * RAD_TO_DEG_CONST;
-    float gyroDegSecY = rawGyroY * RAD_TO_DEG_CONST;
-    float gyroDegSecZ = rawGyroZ * RAD_TO_DEG_CONST;
+    // 5. Akcelerace v násobku gravitačního zrychlení [g]
+    float ax_g = accel.acceleration.x / 9.80665f;
+    float ay_g = accel.acceleration.y / 9.80665f;
+    float az_g = accel.acceleration.z / 9.80665f;
 
-    // 6. Čistá integrace úhlu otočení od počáteční polohy (přesně o kolik stupňů se kufr otočil)
-    imuAngleX += gyroDegSecX * dt;
-    imuAngleY += gyroDegSecY * dt;
-    imuAngleZ += gyroDegSecZ * dt;
+    // Celkové zrychlení pro detekci klidu vs dynamického rázu
+    float totalG = sqrtf(ax_g * ax_g + ay_g * ay_g + az_g * az_g);
 
-    // Uložíme do SystemState
-    globalState.updateIMU(accel.acceleration.x, accel.acceleration.y, accel.acceleration.z,
-                          imuAngleX, imuAngleY, imuAngleZ);
+    // 6. Komplementární filtr:
+    // Pokud je celkové zrychlení blízké 1g (klidný nebo plynulý pohyb),
+    // využijeme gravitační vektor k eliminaci driftu a zaručení návratu přesně na 0.0°!
+    if (totalG > 0.70f && totalG < 1.30f) {
+        // Skutečný fyzický sklon z akcelerometru (vztažený k referenční nule)
+        float accelAngleX = (atan2f(az_g, -ay_g) * (float)RAD_TO_DEG) - accelInitAngleX;
+        float accelAngleZ = (atan2f(ax_g, -ay_g) * (float)RAD_TO_DEG) - accelInitAngleZ;
+
+        // Váha: 98% rychlé gyro, 2% stálý akcelerometr (nuluje drift, drží nulu při zavření/otevření)
+        const float alpha = 0.98f;
+        imuAngleX = alpha * (imuAngleX + 0.5f * (gx + lastGx) * dt) + (1.0f - alpha) * accelAngleX;
+        imuAngleZ = alpha * (imuAngleZ + 0.5f * (gz + lastGz) * dt) + (1.0f - alpha) * accelAngleZ;
+    } else {
+        // Při prudkém rázu / pohybu se spoléháme čistě na gyroskop
+        imuAngleX += 0.5f * (gx + lastGx) * dt;
+        imuAngleZ += 0.5f * (gz + lastGz) * dt;
+    }
+
+    // Osa Y (rotace kolem svislé osy kufru - točna na stole) - čistá numerická integrace gyroskopu
+    imuAngleY += 0.5f * (gy + lastGy) * dt;
+
+    lastGx = gx;
+    lastGy = gy;
+    lastGz = gz;
+
+    // 7. Detekce drbnutí / nárazu (přes hardwarový pin INT1, přerušení nebo přetížení)
+    static unsigned long lastShockTime = 0;
+    static float peakShockG = 1.0f;
+    bool isShock = false;
+
+    #ifdef PIN_IMU_INT
+    bool intPinHigh = (digitalRead(PIN_IMU_INT) == HIGH);
+    #else
+    bool intPinHigh = false;
+    #endif
+
+    if (g_imuHwInterruptFired || intPinHigh || (totalG > 1.25f)) {
+        g_imuHwInterruptFired = false;
+        lastShockTime = millis();
+        if (totalG > peakShockG) peakShockG = totalG;
+    }
+
+    if (millis() - lastShockTime < 1000) {
+        isShock = true;
+    } else {
+        peakShockG = totalG;
+    }
+
+    // Uložíme do sdíleného SystemState (přístupného pro UI displej, web i telemetrii)
+    globalState.updateIMU(ax_g, ay_g, az_g, imuAngleX, imuAngleY, imuAngleZ, isShock, peakShockG);
 #endif
 }
 

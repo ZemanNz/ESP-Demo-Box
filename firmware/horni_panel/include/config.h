@@ -116,6 +116,15 @@
 #define PIN_IMU_INT          45
 #define PIN_GYRO_INT         PIN_IMU_INT
 
+// Práh citlivosti pro detekci drbnutí a probuzení z gyroskopu (WAKE_UP_THS registr 0x5B):
+// 1 LSB ≈ 62.5 mg při rozsahu akcelerometru +/- 4g
+// 0x01 ≈  62.5 mg (extrémní citlivost na lehký dotyk)
+// 0x02 ≈ 125.0 mg (Úroveň 1: Extra citlivé na ťuknutí prstem) -> POŽADAVEK UŽIVATELE
+// 0x04 ≈ 250.0 mg (Úroveň 2: Jemné poklepání na kufr)
+// 0x08 ≈ 500.0 mg (Úroveň 3: Střední drbnutí do stolu/kufru)
+#define IMU_WAKEUP_THS       0x02  // Úroveň 1: Extra citlivé na prst (~125 mg)
+#define IMU_WAKEUP_DUR       0x00  // Doba trvání: 0 ODR cyklů pro okamžitou bleskovou detekci
+
 // =============================================================================
 //  DIGITÁLNÍ SENZORY (NEPOUŽÍVAT INPUT_PULLUP)
 // =============================================================================
