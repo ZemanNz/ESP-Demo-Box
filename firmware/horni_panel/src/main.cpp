@@ -42,14 +42,17 @@ void Task_WiFi_Web(void *pvParameters) {
 }
 
 // ---------------------------------------------------------
-// 2A. Task: Demo Autopilot (Simulátor pro testování displeje)
+// 2A. Task: Demo Autopilot (Automatické střídání všech módů včetně her)
 // ---------------------------------------------------------
-void Task_UART_Simulator(void *pvParameters) {
+void Task_Demo_Autopilot(void *pvParameters) {
     Serial.print("Demo Autopilot bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
 
     int timeInMode = 0;
     AppMode lastMode = globalState.getMode();
+
+    int lastPot = 0;
+    int32_t lastEnc = 0;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50)); 
@@ -59,60 +62,62 @@ void Task_UART_Simulator(void *pvParameters) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
+
+        SensorData data = globalState.getSensorData();
+
+        // 1. Reset časovače při manuální změně módu
         if (current != lastMode) {
-            timeInMode = 0; // Uživatel ručně změnil mód (z webu nebo tlačítkem) -> resetujeme časovač!
+            timeInMode = 0;
             lastMode = current;
+        }
+
+        // 2. Detekce uživatelské aktivity (tlačítka spodního i horního panelu, joystick, potenciometr, enkodér)
+        bool anyBtn = data.btnDown[0] || data.btnDown[1] || data.btnDown[2] || 
+                      data.btnDown[3] || data.btnDown[4] || data.joyBtn || data.btnTop;
+        bool joyActive = (abs((int)data.joyX - 2048) > 800) || (abs((int)data.joyY - 2048) > 800);
+        bool potMoved = abs((int)data.potentiometer - lastPot) > 60;
+        bool encMoved = (data.encoderPos != lastEnc);
+
+        if (anyBtn || joyActive || potMoved || encMoved) {
+            // Uživatel aktivně kufr ovládá -> resetujeme časovač, aby mu autopilot nepřepnul mód pod rukama!
+            timeInMode = 0;
+            lastPot = data.potentiometer;
+            lastEnc = data.encoderPos;
         } else {
             timeInMode += 50;
         }
-        
-        float t = millis() / 1000.0f;
 
-        // ---------------------------------------------------------
-        // 1. GENERÁTOR NÁHODNÝCH DAT (JEN PRO SPODNÍ PANEL / SERVA A ENKODÉR)
-        // ---------------------------------------------------------
-        // Reálné horní senzory (gyro, barva, vzdálenosti, fotorezistory) čteme živě v Task_Sensors!
-        if (timeInMode % 3300 < 50) {
-            // Simulace ovladačů spodního panelu (dokud není aktivní UART)
-            int simPot = random(200, 4000);
-            globalState.updatePotentiometer(simPot);
-
-            int simJoyX = random(200, 4000);
-            int simJoyY = random(200, 4000);
-            globalState.updateJoystick(simJoyX, simJoyY, false);
-
-            bool b0 = (random(0, 2) == 1);
-            bool b1 = (random(0, 2) == 1);
-            bool b2 = (random(0, 2) == 1);
-            bool b3 = (random(0, 2) == 1);
-            bool b4 = (random(0, 2) == 1);
-            globalState.updateDownButtons(b0, b1, b2, b3, b4);
+        // 3. Stanovení doby setrvání v daném módu
+        int requiredDuration = 15000; // Výchozí doba 15 s
+        if (current == MODE_WIFI_SPOJENI || current == MODE_WIFI_DETECTION) {
+            requiredDuration = 35000; // 35 s pro Wi-Fi obrazovky (QR kód, CSI detekce)
+        } else if (current == MODE_GAME_SNAKE || current == MODE_GAME_FLAPPY || current == MODE_2048) {
+            requiredDuration = 25000; // 25 s pro hry
         }
 
-        // ---------------------------------------------------------
-        // 2. PŘEPÍNÁNÍ MEZI MÓDY (Wi-Fi módy 40s, ostatní 10s)
-        // ---------------------------------------------------------
-        int requiredDuration = (current == MODE_WIFI_SPOJENI || current == MODE_WIFI_DETECTION) ? 40000 : 10000;
+        // 4. Automatické cyklické přepnutí na další mód (všech 11 módů včetně her)
         if (timeInMode >= requiredDuration) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
             
-            if (current == MODE_MAIN_MENU) {
-                nextMode = MODE_GYRO; // GYROSKOP (10s)
-            } else if (current == MODE_GYRO) {
-                nextMode = MODE_BAREVNY; // BAREVNÝ SENZOR (10s)
-            } else if (current == MODE_BAREVNY) {
-                nextMode = MODE_VZDALENOST; // VZDÁLENOST (10s)
-            } else if (current == MODE_VZDALENOST) {
-                nextMode = MODE_WIFI_SPOJENI; // WIFI SPOJENÍ & QR KÓD (40s)
-            } else if (current == MODE_WIFI_SPOJENI) {
-                nextMode = MODE_WIFI_DETECTION; // WIFI CSI DETEKCE POHYBU (40s)
-            } else {
-                nextMode = MODE_MAIN_MENU; // Zpět do HLAVNÍHO MENU (10s)
+            switch (current) {
+                case MODE_MAIN_MENU:      nextMode = MODE_GYRO; break;
+                case MODE_GYRO:           nextMode = MODE_GAME_SNAKE; break;
+                case MODE_GAME_SNAKE:     nextMode = MODE_GAME_FLAPPY; break;
+                case MODE_GAME_FLAPPY:    nextMode = MODE_2048; break;
+                case MODE_2048:           nextMode = MODE_VZDALENOST; break;
+                case MODE_VZDALENOST:     nextMode = MODE_WIFI_SPOJENI; break;
+                case MODE_WIFI_SPOJENI:   nextMode = MODE_WIFI_DETECTION; break;
+                case MODE_WIFI_DETECTION: nextMode = MODE_SERVA; break;
+                case MODE_SERVA:          nextMode = MODE_MOTOR; break;
+                case MODE_MOTOR:          nextMode = MODE_BAREVNY; break;
+                case MODE_BAREVNY:        nextMode = MODE_MAIN_MENU; break;
+                default:                  nextMode = MODE_MAIN_MENU; break;
             }
 
-            Serial.printf("[DEMO 6-MODU] Prepinam na mod: %d (doba: %d s)\n", (int)nextMode, (nextMode == MODE_WIFI_SPOJENI || nextMode == MODE_WIFI_DETECTION) ? 40 : 10);
+            Serial.printf("[DEMO AUTOPILOT] Prepinam na mod: %d (doba: %d s)\n", (int)nextMode, requiredDuration / 1000);
             globalState.setMode(nextMode);
+            lastMode = nextMode;
         }
     }
 }
@@ -261,8 +266,8 @@ void Task_Sensors(void *pvParameters) {
         unsigned long now = millis();
         AppMode currentMode = globalState.getMode();
 
-        // Kontrola otočení rotačního enkodéru pro změnu módu - VYPNUTO pro zobrazení čistě Main Menu
-        // globalState.checkModeChange();
+        // Kontrola otočení rotačního enkodéru pro okamžitou manuální změnu módu
+        globalState.checkModeChange();
 
         if (currentMode == MODE_SLEEP) {
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -425,24 +430,6 @@ void Task_Display_UI(void *pvParameters) {
         // OBSLUHA FYZICKÝCH / VIRTUÁLNÍCH TLAČÍTEK A ENKODÉRU PRO PŘEPÍNÁNÍ MÓDŮ
         // ---------------------------------------------------------
         SensorData currentSensors = globalState.getSensorData();
-
-        // A) Enkodér pro procházení módů - dočasně vypnuto, držíme pouze Main Menu pro test UARTu
-        /*
-        int32_t encDiff = currentSensors.encoderPos - lastEncoderPos;
-        if (abs(encDiff) >= 4) {
-            int step = (encDiff > 0) ? 1 : -1;
-            int nextM = ((int)currentMode + step + 12) % 12;
-            globalState.setMode((AppMode)nextM);
-            currentMode = (AppMode)nextM;
-            lastEncoderPos = currentSensors.encoderPos;
-        }
-        */
-
-        // Vynutíme zobrazení pouze Hlavního menu (kromě režimu spánku)
-        if (currentMode != MODE_MAIN_MENU && currentMode != MODE_SLEEP) {
-            globalState.setMode(MODE_MAIN_MENU);
-            currentMode = MODE_MAIN_MENU;
-        }
 
         // Horní fyzické tlačítko: Návrat do Menu nebo info
         if (currentSensors.btnTop && !lastBtnTop) {
@@ -1066,31 +1053,52 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 SensorData data = globalState.getSensorData();
                 static bool g2048_lastBtn[5] = {false, false, false, false, false};
+                static unsigned long lastG2048Action = 0;
+                unsigned long now2048 = millis();
 
                 if (needsFullRedraw) {
                     g2048.reset();
                     g2048.pohyb = true; // Vynutíme první vykreslení po startu hry
+                    lastG2048Action = now2048;
                 }
 
+                bool userAction = false;
                 // Ovládání tlačítky (D-Pad / 5 tlačítek)
-                if (data.btnDown[0] && !g2048_lastBtn[0]) g2048.moveUp();
-                if (data.btnDown[4] && !g2048_lastBtn[4]) g2048.moveDown();
-                if (data.btnDown[1] && !g2048_lastBtn[1]) g2048.moveLeft();
-                if (data.btnDown[3] && !g2048_lastBtn[3]) g2048.moveRight();
-                if (data.btnDown[2] && !g2048_lastBtn[2]) g2048.reset();
+                if (data.btnDown[0] && !g2048_lastBtn[0]) { g2048.moveUp(); userAction = true; }
+                if (data.btnDown[4] && !g2048_lastBtn[4]) { g2048.moveDown(); userAction = true; }
+                if (data.btnDown[1] && !g2048_lastBtn[1]) { g2048.moveLeft(); userAction = true; }
+                if (data.btnDown[3] && !g2048_lastBtn[3]) { g2048.moveRight(); userAction = true; }
+                if (data.btnDown[2] && !g2048_lastBtn[2]) { g2048.reset(); userAction = true; }
 
                 // Ovládání analogovým joystickem
                 static bool joyMoved = false;
-                if (data.joyY > 2800 && !joyMoved) { g2048.moveUp(); joyMoved = true; }
-                else if (data.joyY < 1200 && !joyMoved) { g2048.moveDown(); joyMoved = true; }
-                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft(); joyMoved = true; }
-                else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; }
+                if (data.joyY > 2800 && !joyMoved) { g2048.moveUp(); joyMoved = true; userAction = true; }
+                else if (data.joyY < 1200 && !joyMoved) { g2048.moveDown(); joyMoved = true; userAction = true; }
+                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft(); joyMoved = true; userAction = true; }
+                else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; userAction = true; }
                 else if (data.joyX >= 1200 && data.joyX <= 2800 && data.joyY >= 1200 && data.joyY <= 2800) {
                     joyMoved = false;
                 }
 
+                if (userAction) {
+                    lastG2048Action = now2048;
+                }
+
                 for (int i = 0; i < 5; i++) g2048_lastBtn[i] = data.btnDown[i];
                 
+                // Demo autopilot pro 2048: Pokud nikdo nehraje po dobu 1.5s, uděláme tah náhodným směrem každých 800 ms
+                if (now2048 - lastG2048Action > 1500) {
+                    static unsigned long lastAutoStep = 0;
+                    if (now2048 - lastAutoStep >= 800) {
+                        lastAutoStep = now2048;
+                        int dir = random(0, 4);
+                        if (dir == 0) g2048.moveUp();
+                        else if (dir == 1) g2048.moveDown();
+                        else if (dir == 2) g2048.moveLeft();
+                        else g2048.moveRight();
+                    }
+                }
+
                 // Překreslí se POUZE když si hra vyžádá překreslení (tzn. změnil se stav)
                 if (g2048.pohyb) {
                     g2048.draw();
@@ -1549,26 +1557,38 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 10;
                 SensorData data = globalState.getSensorData();
                 static bool snake_lastBtn[5] = {false, false, false, false, false};
+                static unsigned long lastSnakeAction = 0;
 
+                bool snakeUserMove = false;
                 // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek)
-                if (data.btnDown[0] && !snake_lastBtn[0]) snake.goUp();
-                if (data.btnDown[4] && !snake_lastBtn[4]) snake.goDown();
-                if (data.btnDown[1] && !snake_lastBtn[1]) snake.goLeft();
-                if (data.btnDown[3] && !snake_lastBtn[3]) snake.goRight();
+                if (data.btnDown[0] && !snake_lastBtn[0]) { snake.goUp(); snakeUserMove = true; }
+                if (data.btnDown[4] && !snake_lastBtn[4]) { snake.goDown(); snakeUserMove = true; }
+                if (data.btnDown[1] && !snake_lastBtn[1]) { snake.goLeft(); snakeUserMove = true; }
+                if (data.btnDown[3] && !snake_lastBtn[3]) { snake.goRight(); snakeUserMove = true; }
 
                 // Ovládání joystickem
-                if (data.joyY > 2800) snake.goUp();
-                else if (data.joyY < 1200) snake.goDown();
-                if (data.joyX < 1200) snake.goLeft();
-                else if (data.joyX > 2800) snake.goRight();
+                if (data.joyY > 2800) { snake.goUp(); snakeUserMove = true; }
+                else if (data.joyY < 1200) { snake.goDown(); snakeUserMove = true; }
+                if (data.joyX < 1200) { snake.goLeft(); snakeUserMove = true; }
+                else if (data.joyX > 2800) { snake.goRight(); snakeUserMove = true; }
+
+                if (snakeUserMove) {
+                    lastSnakeAction = aktualniCas;
+                }
 
                 // Restart hry po Game Over stiskem středového tlačítka nebo joysticku
                 if ((data.btnDown[2] && !snake_lastBtn[2]) || data.joyBtn) {
+                    lastSnakeAction = aktualniCas;
                     if (snake.isGameOver()) {
                         snake.reset();
                     }
                 }
                 for (int i = 0; i < 5; i++) snake_lastBtn[i] = data.btnDown[i];
+
+                // Demo autopilot pro hada: pokud je Game Over a nikdo nehraje déle než 2s, automaticky restartujeme hru
+                if (snake.isGameOver() && (aktualniCas - lastSnakeAction > 2000)) {
+                    snake.reset();
+                }
 
                 if (aktualniCas - casPoslednihoKroku >= 150) {
                     casPoslednihoKroku = aktualniCas;
@@ -1587,10 +1607,12 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 10;
                 SensorData data = globalState.getSensorData();
                 static bool flappy_lastBtn = false;
+                static unsigned long lastFlappyAction = 0;
 
                 // Skok nebo restart hry při stisku kteréhokoliv akčního tlačítka
                 bool jumpPress = (data.btnDown[0] || data.btnDown[2] || data.btnDown[4] || data.joyBtn || data.btnTop);
                 if (jumpPress && !flappy_lastBtn) {
+                    lastFlappyAction = aktualniCasFlappy;
                     if (flappy.getGameOver()) {
                         flappy.reset();
                     } else {
@@ -1598,6 +1620,20 @@ void Task_Display_UI(void *pvParameters) {
                     }
                 }
                 flappy_lastBtn = jumpPress;
+
+                // Demo autopilot pro Flappy: Pokud uživatel nehraje, ptáček občas skočí a při Game Over se po 1.5s restartuje
+                if (aktualniCasFlappy - lastFlappyAction > 1500) {
+                    if (flappy.getGameOver()) {
+                        flappy.reset();
+                        lastFlappyAction = aktualniCasFlappy;
+                    } else {
+                        static unsigned long lastAutoJump = 0;
+                        if (aktualniCasFlappy - lastAutoJump >= 500) {
+                            lastAutoJump = aktualniCasFlappy;
+                            flappy.jump();
+                        }
+                    }
+                }
 
                 if (aktualniCasFlappy - casPoslednihoKroku >= 40) {
                     casPoslednihoKroku = aktualniCasFlappy;
@@ -1635,9 +1671,7 @@ void setup() {
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
     xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 8192, NULL, 1, NULL, 0); // Core 0
-    
-    // Simulátor UARTu vypnut – přepnuto na reálnou UART linku se spodním panelem
-    // xTaskCreatePinnedToCore(Task_UART_Simulator, "UART_Mock", 4096, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(Task_Demo_Autopilot, "Demo_Autopilot", 4096, NULL, 1, NULL, 0); // Core 0 (Automatické střídání všech módů a her)
     
 #ifdef ENABLE_UART_ESP
     xTaskCreatePinnedToCore(Task_UART, "UART_Top", 4096, NULL, 2, NULL, 0); // Core 0 (Reálná UART komunikace se spodním panelem)
