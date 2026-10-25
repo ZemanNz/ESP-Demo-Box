@@ -83,11 +83,18 @@
 // Stisknuto = LOW (0 V) | Uvolněno = HIGH (3.3 V)
 
 #define PIN_JOY_SW           2   // Tlačítko joysticku (spíná GND -> bezpečný boot!) -> pinMode INPUT_PULLUP
-#define PIN_BTN_1           12   // Tlačítko 1 / SW1 (Vlevo) - spíná GND (bezpečné pro Flash 3.3V) -> pinMode INPUT_PULLUP
-#define PIN_BTN_2           23   // Tlačítko 2 / SW2 (Střed / OK) - spíná GND -> pinMode INPUT_PULLUP
-#define PIN_BTN_3            5   // Tlačítko 3 / SW3 (Vpravo) - spíná GND -> pinMode INPUT_PULLUP
-#define PIN_BTN_4           15   // Tlačítko 4 / SW4 (Nahoru) - spíná GND -> pinMode INPUT_PULLUP
+#define PIN_BTN_1           15   // Tlačítko 1 / SW1 (Vlevo) - spíná GND -> pinMode INPUT_PULLUP
+#define PIN_BTN_2            5   // Tlačítko 2 / SW2 (Střed / OK) - spíná GND -> pinMode INPUT_PULLUP
+#define PIN_BTN_3           23   // Tlačítko 3 / SW3 (Vpravo) - spíná GND -> pinMode INPUT_PULLUP
+#define PIN_BTN_4           12   // Tlačítko 4 / SW4 (Nahoru) - spíná GND -> pinMode INPUT_PULLUP
 #define PIN_BTN_5           26   // Tlačítko 5 / SW5 (Dolů) - spíná GND -> pinMode INPUT_PULLUP
+
+// Indexy tlačítek v poli btns[5] / btnDown[5] (index = číslo tlačítka - 1):
+#define BTN_DOWN_LEFT        0   // Index 0: Tlačítko 1 (SW1) - Vlevo
+#define BTN_DOWN_CENTER      1   // Index 1: Tlačítko 2 (SW2) - Střed / OK
+#define BTN_DOWN_RIGHT       2   // Index 2: Tlačítko 3 (SW3) - Vpravo
+#define BTN_DOWN_UP          3   // Index 3: Tlačítko 4 (SW4) - Nahoru
+#define BTN_DOWN_DOWN        4   // Index 4: Tlačítko 5 (SW5) - Dolů
 
 #define PIN_ENC_CLK         32   // Rotační enkodér CLK -> pinMode INPUT_PULLUP
 #define PIN_ENC_DT           4   // Rotační enkodér DT  -> pinMode INPUT_PULLUP

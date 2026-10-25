@@ -102,7 +102,7 @@
 // =============================================================================
 //  DIGITÁLNÍ VSTUPY – TLAČÍTKA A PŘERUŠENÍ
 // =============================================================================
-// Tlačítko INFO (Spíná přímo proti GND v režimu Active LOW)
+// Tlačítko INFO na horním panelu (Spíná přímo proti GND v režimu Active LOW)
 // DŮLEŽITÉ: Vyžaduje vnitřní pull-up: pinMode(PIN_BTN1, INPUT_PULLUP);
 // Stisknuto = LOW (0 V) | Uvolněno = HIGH (3.3 V)
 #define PIN_BTN1             47   // Tlačítko INFO
@@ -110,6 +110,22 @@
 
 // Tlačítko Reset je hardwarově připojeno přímo na systémový pin EN/RST procesoru
 #define PIN_BTN2             -1
+
+// =============================================================================
+//  ROZLOŽENÍ TLAČÍTEK ZE SPODNÍHO PANELU (Indexy v poli btnDown[5])
+// =============================================================================
+// Fyzické zapojení spodních tlačítek (číslování 1 až 5, indexy 0 až 4):
+// Tlačítko 1 / SW1 (index 0) = VLEVO   (LEFT)   - GPIO 15 spodního ESP32
+// Tlačítko 2 / SW2 (index 1) = STŘED   (CENTER) - GPIO 5 spodního ESP32 (OK / Reset / Akce)
+// Tlačítko 3 / SW3 (index 2) = VPRAVO  (RIGHT)  - GPIO 23 spodního ESP32
+// Tlačítko 4 / SW4 (index 3) = NAHORU  (UP)     - GPIO 12 spodního ESP32
+// Tlačítko 5 / SW5 (index 4) = DOLŮ    (DOWN)   - GPIO 26 spodního ESP32
+
+#define BTN_DOWN_LEFT        0    // Index 0: Tlačítko 1 (SW1) - VLEVO
+#define BTN_DOWN_CENTER      1    // Index 1: Tlačítko 2 (SW2) - STŘED / OK / RESET
+#define BTN_DOWN_RIGHT       2    // Index 2: Tlačítko 3 (SW3) - VPRAVO
+#define BTN_DOWN_UP          3    // Index 3: Tlačítko 4 (SW4) - NAHORU
+#define BTN_DOWN_DOWN        4    // Index 4: Tlačítko 5 (SW5) - DOLŮ
 
 // Hardwarové přerušení z gyroskopu LSM6DS3 (INT1)
 // Bezpečný pin GPIO 45 (GPIO 33-37 jsou interně Octal PSRAM / Flash!)

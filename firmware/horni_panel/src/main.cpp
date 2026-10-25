@@ -72,8 +72,9 @@ void Task_Demo_Autopilot(void *pvParameters) {
         }
 
         // 2. Detekce uživatelské aktivity (tlačítka spodního i horního panelu, joystick, potenciometr, enkodér)
-        bool anyBtn = data.btnDown[0] || data.btnDown[1] || data.btnDown[2] || 
-                      data.btnDown[3] || data.btnDown[4] || data.joyBtn || data.btnTop;
+        bool anyBtn = data.btnDown[BTN_DOWN_LEFT] || data.btnDown[BTN_DOWN_CENTER] || 
+                      data.btnDown[BTN_DOWN_RIGHT] || data.btnDown[BTN_DOWN_UP] || 
+                      data.btnDown[BTN_DOWN_DOWN] || data.joyBtn || data.btnTop;
         bool joyActive = (abs((int)data.joyX - 2048) > 800) || (abs((int)data.joyY - 2048) > 800);
         bool potMoved = abs((int)data.potentiometer - lastPot) > 60;
         bool encMoved = (data.encoderPos != lastEnc);
@@ -397,9 +398,10 @@ void Task_Sensors(void *pvParameters) {
             Serial.printf("  Otres / Tap:  %s (%.2f g)\n",
                           data.imuShock ? ">>> DRBNUTI DETEKOVANO! <<<" : "Klid", data.imuShockG);
             Serial.printf("  Tlacitko TOP: %s\n", data.btnTop ? "STISKNUTO" : "VOLNO");
-            Serial.printf("  Dolni panel (UART): Pot: %4d | Joy: X=%4d, Y=%4d, Btn=%d | Tlacitka: [%d %d %d %d %d] | Enc: %d\n",
+            Serial.printf("  Dolni panel (UART): Pot: %4d | Joy: X=%4d, Y=%4d, Btn=%d | Tlacitka: [L:%d C:%d R:%d U:%d D:%d] | Enc: %d\n",
                           data.potentiometer, data.joyX, data.joyY, data.joyBtn,
-                          data.btnDown[0], data.btnDown[1], data.btnDown[2], data.btnDown[3], data.btnDown[4],
+                          data.btnDown[BTN_DOWN_LEFT], data.btnDown[BTN_DOWN_CENTER], data.btnDown[BTN_DOWN_RIGHT],
+                          data.btnDown[BTN_DOWN_UP], data.btnDown[BTN_DOWN_DOWN],
                           data.encoderPos);
             Serial.println("================================================");
         }
@@ -769,25 +771,25 @@ void Task_Display_UI(void *pvParameters) {
                                       (data.btnDown[4] ? 16 : 0);
                     if (needsFullRedraw || btnMask != lastButtons) {
                         lastButtons = btnMask;
-                        // Horní tlačítko (btnDown[1] - zelené)
-                        gfx.fillCircle(112, 160, 8, data.btnDown[1] ? ST77XX_GREEN : ST77XX_WHITE);
+                        // Horní tlačítko (BTN_DOWN_UP = index 3 - zelené)
+                        gfx.fillCircle(112, 160, 8, data.btnDown[BTN_DOWN_UP] ? ST77XX_GREEN : ST77XX_WHITE);
                         gfx.drawCircle(112, 160, 8, ST77XX_BLACK);
 
-                        // Prostřední tlačítko (btnDown[0] - červené)
-                        gfx.fillCircle(112, 188, 9, data.btnDown[0] ? ST77XX_RED : ST77XX_WHITE);
-                        gfx.drawCircle(112, 188, 9, ST77XX_BLACK);
+                        // Dolní tlačítko (BTN_DOWN_DOWN = index 4 - azurové)
+                        gfx.fillCircle(112, 216, 8, data.btnDown[BTN_DOWN_DOWN] ? ST77XX_CYAN : ST77XX_WHITE);
+                        gfx.drawCircle(112, 216, 8, ST77XX_BLACK);
 
-                        // Levé tlačítko (btnDown[2] - modré)
-                        gfx.fillCircle(86, 188, 8, data.btnDown[2] ? ST77XX_BLUE : ST77XX_WHITE);
+                        // Levé tlačítko (BTN_DOWN_LEFT = index 0 - modré)
+                        gfx.fillCircle(86, 188, 8, data.btnDown[BTN_DOWN_LEFT] ? ST77XX_BLUE : ST77XX_WHITE);
                         gfx.drawCircle(86, 188, 8, ST77XX_BLACK);
 
-                        // Pravé tlačítko (btnDown[3] - žluté)
-                        gfx.fillCircle(138, 188, 8, data.btnDown[3] ? ST77XX_YELLOW : ST77XX_WHITE);
+                        // Pravé tlačítko (BTN_DOWN_RIGHT = index 2 - žluté)
+                        gfx.fillCircle(138, 188, 8, data.btnDown[BTN_DOWN_RIGHT] ? ST77XX_YELLOW : ST77XX_WHITE);
                         gfx.drawCircle(138, 188, 8, ST77XX_BLACK);
 
-                        // Dolní tlačítko (btnDown[4] - azurové)
-                        gfx.fillCircle(112, 216, 8, data.btnDown[4] ? ST77XX_CYAN : ST77XX_WHITE);
-                        gfx.drawCircle(112, 216, 8, ST77XX_BLACK);
+                        // Prostřední tlačítko (BTN_DOWN_CENTER = index 1 - červené)
+                        gfx.fillCircle(112, 188, 9, data.btnDown[BTN_DOWN_CENTER] ? ST77XX_RED : ST77XX_WHITE);
+                        gfx.drawCircle(112, 188, 9, ST77XX_BLACK);
                     }
 
                     // D) Joystick X plný Pac-man kruh (Azurový / Modrý)
@@ -1063,18 +1065,18 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 bool userAction = false;
-                // Ovládání tlačítky (D-Pad / 5 tlačítek)
-                if (data.btnDown[0] && !g2048_lastBtn[0]) { g2048.moveUp(); userAction = true; }
-                if (data.btnDown[4] && !g2048_lastBtn[4]) { g2048.moveDown(); userAction = true; }
-                if (data.btnDown[1] && !g2048_lastBtn[1]) { g2048.moveLeft(); userAction = true; }
-                if (data.btnDown[3] && !g2048_lastBtn[3]) { g2048.moveRight(); userAction = true; }
-                if (data.btnDown[2] && !g2048_lastBtn[2]) { g2048.reset(); userAction = true; }
+                // Ovládání tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT, a CENTER (Reset)
+                if (data.btnDown[BTN_DOWN_UP] && !g2048_lastBtn[BTN_DOWN_UP])          { g2048.moveUp();    userAction = true; }
+                if (data.btnDown[BTN_DOWN_DOWN] && !g2048_lastBtn[BTN_DOWN_DOWN])      { g2048.moveDown();  userAction = true; }
+                if (data.btnDown[BTN_DOWN_LEFT] && !g2048_lastBtn[BTN_DOWN_LEFT])      { g2048.moveLeft();  userAction = true; }
+                if (data.btnDown[BTN_DOWN_RIGHT] && !g2048_lastBtn[BTN_DOWN_RIGHT])    { g2048.moveRight(); userAction = true; }
+                if (data.btnDown[BTN_DOWN_CENTER] && !g2048_lastBtn[BTN_DOWN_CENTER])  { g2048.reset();     userAction = true; }
 
-                // Ovládání analogovým joystickem
+                // Ovládání analogovým joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
                 static bool joyMoved = false;
-                if (data.joyY > 2800 && !joyMoved) { g2048.moveUp(); joyMoved = true; userAction = true; }
-                else if (data.joyY < 1200 && !joyMoved) { g2048.moveDown(); joyMoved = true; userAction = true; }
-                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft(); joyMoved = true; userAction = true; }
+                if (data.joyY < 1200 && !joyMoved)      { g2048.moveUp();    joyMoved = true; userAction = true; }
+                else if (data.joyY > 2800 && !joyMoved) { g2048.moveDown();  joyMoved = true; userAction = true; }
+                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft();  joyMoved = true; userAction = true; }
                 else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; userAction = true; }
                 else if (data.joyX >= 1200 && data.joyX <= 2800 && data.joyY >= 1200 && data.joyY <= 2800) {
                     joyMoved = false;
@@ -1122,13 +1124,15 @@ void Task_Display_UI(void *pvParameters) {
                 static int lastLaserMm = -999;
                 static int lastIrMm    = -999;
 
-                // Obsluha tlačítek pro přepínání aktivního senzoru a LED:
-                // Tlačítko 2 (Left) -> ULT, Tlačítko 3 (Center / On) -> Laser, Tlačítko 4 (Right) -> IR
-                if (data.btnDown[1]) {
+                // Obsluha tlačítek pro přepínání aktivního senzoru a LED nad senzory:
+                // Tlačítko 1 Vlevo (BTN_DOWN_LEFT)   -> Ultrazvuk LED (D4)
+                // Tlačítko 2 Střed (BTN_DOWN_CENTER) -> Laser LED (D5)
+                // Tlačítko 3 Vpravo (BTN_DOWN_RIGHT) -> IR LED (D1)
+                if (data.btnDown[BTN_DOWN_LEFT]) {
                     globalState.updateLeds(true, false, false);
-                } else if (data.btnDown[2]) {
+                } else if (data.btnDown[BTN_DOWN_CENTER]) {
                     globalState.updateLeds(false, false, true);
-                } else if (data.btnDown[3]) {
+                } else if (data.btnDown[BTN_DOWN_RIGHT]) {
                     globalState.updateLeds(false, true, false);
                 }
 
@@ -1560,24 +1564,24 @@ void Task_Display_UI(void *pvParameters) {
                 static unsigned long lastSnakeAction = 0;
 
                 bool snakeUserMove = false;
-                // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek)
-                if (data.btnDown[0] && !snake_lastBtn[0]) { snake.goUp(); snakeUserMove = true; }
-                if (data.btnDown[4] && !snake_lastBtn[4]) { snake.goDown(); snakeUserMove = true; }
-                if (data.btnDown[1] && !snake_lastBtn[1]) { snake.goLeft(); snakeUserMove = true; }
-                if (data.btnDown[3] && !snake_lastBtn[3]) { snake.goRight(); snakeUserMove = true; }
+                // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT
+                if (data.btnDown[BTN_DOWN_UP] && !snake_lastBtn[BTN_DOWN_UP])          { snake.goUp();    snakeUserMove = true; }
+                if (data.btnDown[BTN_DOWN_DOWN] && !snake_lastBtn[BTN_DOWN_DOWN])      { snake.goDown();  snakeUserMove = true; }
+                if (data.btnDown[BTN_DOWN_LEFT] && !snake_lastBtn[BTN_DOWN_LEFT])      { snake.goLeft();  snakeUserMove = true; }
+                if (data.btnDown[BTN_DOWN_RIGHT] && !snake_lastBtn[BTN_DOWN_RIGHT])    { snake.goRight(); snakeUserMove = true; }
 
-                // Ovládání joystickem
-                if (data.joyY > 2800) { snake.goUp(); snakeUserMove = true; }
-                else if (data.joyY < 1200) { snake.goDown(); snakeUserMove = true; }
-                if (data.joyX < 1200) { snake.goLeft(); snakeUserMove = true; }
+                // Ovládání joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
+                if (data.joyY < 1200)      { snake.goUp();    snakeUserMove = true; }
+                else if (data.joyY > 2800) { snake.goDown();  snakeUserMove = true; }
+                if (data.joyX < 1200)      { snake.goLeft();  snakeUserMove = true; }
                 else if (data.joyX > 2800) { snake.goRight(); snakeUserMove = true; }
 
                 if (snakeUserMove) {
                     lastSnakeAction = aktualniCas;
                 }
 
-                // Restart hry po Game Over stiskem středového tlačítka nebo joysticku
-                if ((data.btnDown[2] && !snake_lastBtn[2]) || data.joyBtn) {
+                // Restart hry po Game Over stiskem středového tlačítka (CENTER / BTN2) nebo joysticku
+                if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || data.joyBtn) {
                     lastSnakeAction = aktualniCas;
                     if (snake.isGameOver()) {
                         snake.reset();
@@ -1609,8 +1613,10 @@ void Task_Display_UI(void *pvParameters) {
                 static bool flappy_lastBtn = false;
                 static unsigned long lastFlappyAction = 0;
 
-                // Skok nebo restart hry při stisku kteréhokoliv akčního tlačítka
-                bool jumpPress = (data.btnDown[0] || data.btnDown[2] || data.btnDown[4] || data.joyBtn || data.btnTop);
+                // Skok nebo restart hry při stisku kteréhokoliv tlačítka D-Padu, joysticku nebo horního tlačítka
+                bool jumpPress = (data.btnDown[BTN_DOWN_UP] || data.btnDown[BTN_DOWN_CENTER] ||
+                                  data.btnDown[BTN_DOWN_LEFT] || data.btnDown[BTN_DOWN_RIGHT] ||
+                                  data.btnDown[BTN_DOWN_DOWN] || data.joyBtn || data.btnTop);
                 if (jumpPress && !flappy_lastBtn) {
                     lastFlappyAction = aktualniCasFlappy;
                     if (flappy.getGameOver()) {
