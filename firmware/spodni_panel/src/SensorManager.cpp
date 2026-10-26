@@ -210,6 +210,18 @@ void SensorManager::updateOled(const char* line1, const char* line2, const char*
 #endif
 }
 
+void SensorManager::setOledPower(bool on) {
+#ifdef ENABLE_OLED_SSD1306
+    if (on) {
+        display.ssd1306_command(SSD1306_DISPLAYON);
+    } else {
+        display.clearDisplay();
+        display.display();
+        display.ssd1306_command(SSD1306_DISPLAYOFF);
+    }
+#endif
+}
+
 void SensorManager::updateAutoStopParams(int16_t diffCentideg, uint8_t readings) {
 #ifdef ENABLE_SMART_SERVO
     SmartServoBus::AutoStopParams params = {

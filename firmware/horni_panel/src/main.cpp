@@ -528,6 +528,7 @@ void Task_Display_UI(void *pvParameters) {
                     if (Wire.available()) Wire.read();
                     vTaskDelay(pdMS_TO_TICKS(10));
                 }
+                g_imuHwInterruptFired = false;
                 #endif
                 #endif
 
@@ -544,6 +545,23 @@ void Task_Display_UI(void *pvParameters) {
                     SerialESP.flush();
                 #endif
 
+
+                // Odeslání informace spodnímu panelu, že přecházíme do spánku
+                TopToBottomPacket sleepPkt;
+                memset(&sleepPkt, 0, sizeof(sleepPkt));
+                sleepPkt.startByte = UART_FRAME_START_TOP_TO_BOTTOM; // 0xAA
+                sleepPkt.currentMode = (uint8_t)MODE_SLEEP;
+                sleepPkt.endByte = UART_FRAME_END; // 0xFE
+                sleepPkt.checksum = calculateChecksum((const uint8_t*)&sleepPkt, sizeof(TopToBottomPacket) - 2);
+
+                SerialESP.write((const uint8_t*)&sleepPkt, sizeof(TopToBottomPacket));
+                SerialESP.flush(); // Počkáme, až všechny bajty fyzicky odejdou z TX pinu do drátu
+                vTaskDelay(pdMS_TO_TICKS(150)); // Krátká pauza, aby to spodní panel stihl zpracovat
+
+                while (SerialESP.available()) {
+                    SerialESP.read();
+                }
+
                 // 11. Nastavení hardwarových zdrojů probuzení:
                 // A) Horní tlačítko (stisk spojí na GND = LOW úroveň)
                 #ifdef PIN_BTN1
@@ -555,11 +573,14 @@ void Task_Display_UI(void *pvParameters) {
                     gpio_wakeup_enable((gpio_num_t)PIN_IMU_INT, GPIO_INTR_HIGH_LEVEL);
                 #endif
 
-                esp_sleep_enable_gpio_wakeup();
-
-                #ifdef ENABLE_UART_ESP
-                    esp_sleep_enable_uart_wakeup(1);
+                // C) UART linka (RX) - probuzení od spodního panelu při stisku tlačítka dole
+                #if defined(ENABLE_UART_ESP) && defined(UART_ESP_RX)
+                if (digitalRead(UART_ESP_RX) == HIGH) {
+                    gpio_wakeup_enable((gpio_num_t)UART_ESP_RX, GPIO_INTR_LOW_LEVEL);
+                }
                 #endif
+
+                esp_sleep_enable_gpio_wakeup();
 
                 // 12. VSTUP DO SKUTEČNÉHO LEHKÉHO SPÁNKU
                 esp_light_sleep_start();
@@ -567,6 +588,46 @@ void Task_Display_UI(void *pvParameters) {
                 // ===================================================
                 // 13. PROBUZENÍ! (Kód pokračuje okamžitě zde)
                 // ===================================================
+                esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
+
+                // Okamžitě odečteme stav pinů a periferií PŘED jakýmikoliv prodlevami:
+                #ifdef PIN_BTN1
+                bool btn1Pressed = (digitalRead(PIN_BTN1) == LOW);
+                #else
+                bool btn1Pressed = false;
+                #endif
+
+                #ifdef PIN_IMU_INT
+                bool imuPinActive = (digitalRead(PIN_IMU_INT) == HIGH);
+                bool imuIsrFired = g_imuHwInterruptFired;
+                // Přečteme registr WAKE_UP_SRC (0x1B) z gyroskopu LSM6DS3
+                uint8_t lsmWakeSrc = 0;
+                Wire.beginTransmission(0x6B);
+                Wire.write(0x1B);
+                Wire.endTransmission(false);
+                Wire.requestFrom((uint8_t)0x6B, (uint8_t)1);
+                if (Wire.available()) lsmWakeSrc = Wire.read();
+                if (lsmWakeSrc == 0) {
+                    Wire.beginTransmission(0x6A);
+                    Wire.write(0x1B);
+                    Wire.endTransmission(false);
+                    Wire.requestFrom((uint8_t)0x6A, (uint8_t)1);
+                    if (Wire.available()) lsmWakeSrc = Wire.read();
+                }
+                bool gyroWoke = imuIsrFired || imuPinActive || ((lsmWakeSrc & 0x0F) != 0);
+                #else
+                bool gyroWoke = false;
+                uint8_t lsmWakeSrc = 0;
+                bool imuIsrFired = false;
+                bool imuPinActive = false;
+                #endif
+
+                #if defined(ENABLE_UART_ESP) && defined(UART_ESP_RX)
+                bool uartActive = (digitalRead(UART_ESP_RX) == LOW) || (SerialESP.available() > 0);
+                #else
+                bool uartActive = false;
+                #endif
+
                 // Okamžitě deaktivujeme wake-up, aby se neopakovalo
                 esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
                 #ifdef PIN_BTN1
@@ -575,13 +636,24 @@ void Task_Display_UI(void *pvParameters) {
                 #ifdef PIN_IMU_INT
                     gpio_wakeup_disable((gpio_num_t)PIN_IMU_INT);
                 #endif
+                #if defined(ENABLE_UART_ESP) && defined(UART_ESP_RX)
+                    gpio_wakeup_disable((gpio_num_t)UART_ESP_RX);
+                #endif
+
+                #ifdef ENABLE_UART_ESP
+                // Okamžitě pošleme probouzecí puls pro spodní panel (probudí ho na GPIO 16)
+                SerialESP.write((uint8_t)0x00);
+                SerialESP.flush();
+                #endif
 
                 // Pokud byl probuzen tlačítkem, počkáme na jeho uvolnění, aby neprokliklo v Menu
                 #ifdef PIN_BTN1
-                while (digitalRead(PIN_BTN1) == LOW) {
-                    vTaskDelay(pdMS_TO_TICKS(20));
+                if (btn1Pressed) {
+                    while (digitalRead(PIN_BTN1) == LOW) {
+                        vTaskDelay(pdMS_TO_TICKS(20));
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(50));
                 }
-                vTaskDelay(pdMS_TO_TICKS(100));
                 #endif
 
                 // Znovu zapneme Wi-Fi
@@ -597,20 +669,15 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setLCDBacklight(true);
                 #endif
 
-                esp_sleep_wakeup_cause_t duvod = esp_sleep_get_wakeup_cause();
                 Serial.printf("\n[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
-                if (duvod == ESP_SLEEP_WAKEUP_GPIO) {
-                    #ifdef PIN_IMU_INT
-                    if (digitalRead(PIN_IMU_INT) == HIGH) {
-                        Serial.println("PROBUZENO OTRESEM / TUKNUTIM DO KUFROVEHO GYROSKOPU!");
-                    } else {
-                        Serial.println("PROBUZENO STISKEM HORNÍHO TLACITKA (GPIO)!");
-                    }
-                    #else
-                    Serial.println("PROBUZENO Z GPIO!");
-                    #endif
-                } else if (duvod == ESP_SLEEP_WAKEUP_UART) {
-                    Serial.println("PROBUZENO Z DOLNIHO PANELU (UART)");
+                if (gyroWoke) {
+                    Serial.printf("PROBUZENO OTRESEM / TUKNUTIM DO GYROSKOPU! (src=0x%02X, isr=%d, pin=%d)\n",
+                                  lsmWakeSrc, (int)imuIsrFired, (int)imuPinActive);
+                } else if (uartActive || (!btn1Pressed && !gyroWoke)) {
+                    Serial.printf("PROBUZENO ZE SPODNIHO PANELU (UART)! (dostupno bajtu: %d)\n",
+                                  SerialESP.available());
+                } else if (btn1Pressed) {
+                    Serial.println("PROBUZENO STISKEM HORNIHO TLACITKA (GPIO 47)!");
                 } else {
                     Serial.printf("PROBUZENO JINYM ZDROJEM: %d\n", (int)duvod);
                 }

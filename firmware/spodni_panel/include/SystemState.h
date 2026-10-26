@@ -11,7 +11,7 @@
 // ---------------------------------------------------------
 enum AppMode {
     MODE_MAIN_MENU,
-    MODE_SENSORS,
+    MODE_GYRO,
     MODE_GAME_SNAKE,
     MODE_GAME_FLAPPY,
     MODE_2048,
@@ -23,6 +23,7 @@ enum AppMode {
     MODE_BAREVNY,
     MODE_SLEEP
 };
+#define MODE_SENSORS MODE_GYRO
 
 struct BottomInputs {
     // Joystick
@@ -106,6 +107,16 @@ public:
             xSemaphoreGive(stateMutex);
         }
         return copy;
+    }
+
+    void setMode(AppMode m) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            Mode = m;
+            outputs.currentMode = (uint8_t)m;
+            needsUiUpdate = true;
+            needsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
     }
 
     // -----------------------------------------------------

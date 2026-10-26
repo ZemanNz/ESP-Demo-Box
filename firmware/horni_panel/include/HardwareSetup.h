@@ -20,4 +20,7 @@ bool initializeAllHardware();
 // Globální instance sériové linky pro komunikaci se spodním panelem (UART1)
 extern HardwareSerial SerialESP;
 
+// Hardwarové přerušení pro detekci drbnutí z gyroskopu LSM6DS3 (INT1)
+extern volatile bool g_imuHwInterruptFired;
+
 #endif // HARDWARE_SETUP_H

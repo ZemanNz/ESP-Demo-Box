@@ -44,6 +44,7 @@ public:
 #endif
     void setLedStrip(const uint32_t leds[8], uint8_t brightness = 50);
     void updateOled(const char* line1, const char* line2 = nullptr, const char* line3 = nullptr, const char* line4 = nullptr);
+    void setOledPower(bool on); // Zapnutí (true) / vypnutí (false - sleep) OLED displeje
 
     // Aktualizace AutoStop parametrů za běhu
     void updateAutoStopParams(int16_t diffCentideg, uint8_t readings);
