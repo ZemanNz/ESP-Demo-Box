@@ -44,6 +44,7 @@ HardwareSerial SerialESP(1);
 #ifdef ENABLE_WS2812B
   #include <Adafruit_NeoPixel.h>
   Adafruit_NeoPixel strip(WS2812B_NUM_LEDS, PIN_WS2812B, NEO_GRB + NEO_KHZ800);
+  Adafruit_NeoPixel builtinPixel(1, 38, NEO_GRB + NEO_KHZ800);
 #endif
 
 
@@ -253,6 +254,10 @@ bool setupSensors() {
     strip.begin();
     strip.setBrightness(60);
     strip.show(); // Vypne všechny LED
+
+    builtinPixel.begin();
+    builtinPixel.clear();
+    builtinPixel.show();
 #endif
 
 #ifdef ENABLE_74HC595

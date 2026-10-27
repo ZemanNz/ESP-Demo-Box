@@ -161,9 +161,9 @@
 
 // Infračervené senzory
 // IR1 = Analogový senzor vzdálenosti (GPIO 20, ADC2_CH9)
-// IR2 = Digitální detekce překážky (GPIO 38)
+// IR2 = Digitální detekce překážky (GPIO 48)
 #define PIN_IR1              20   // IR Senzor 1 (Analogovy dálkoměr na GPIO 20)
-#define PIN_IR2              38   // IR Senzor 2 (Digitální detekce překážky na GPIO 38)
+#define PIN_IR2              48   // IR Senzor 2 (Digitální detekce překážky na GPIO 48)
 #define PIN_IR_DIST          PIN_IR1
 #define PIN_IR_ANALOG        PIN_IR1
 #define PIN_IR_OBSTACLE      PIN_IR2

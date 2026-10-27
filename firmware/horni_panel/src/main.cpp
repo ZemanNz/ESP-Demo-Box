@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Preferences.h>
 #include "SystemState.h"
 #include "HardwareSetup.h"
 #include "GraphicsManager.h"
@@ -19,6 +20,30 @@ SnakeGame snake;
 FlappyGame flappy;
 Game2048 g2048;
 WebManager webManager;
+
+// Trvalé ukládání rekordů her (NVS / Flash paměť)
+Preferences gamePrefs;
+int bestScoreSnake = 0;
+int bestScoreFlappy = 0;
+int bestScore2048 = 0;
+
+void loadHighScores() {
+    gamePrefs.begin("scores", true); // read-only
+    bestScoreSnake = gamePrefs.getInt("snake", 0);
+    bestScoreFlappy = gamePrefs.getInt("flappy", 0);
+    bestScore2048 = gamePrefs.getInt("2048", 0);
+    gamePrefs.end();
+}
+
+void checkAndUpdateHighScore(const char* key, int currentScore, int &bestScore) {
+    if (currentScore > bestScore) {
+        bestScore = currentScore;
+        gamePrefs.begin("scores", false); // read-write
+        gamePrefs.putInt(key, bestScore);
+        gamePrefs.end();
+        Serial.printf("[HIGHSCORE] Novy rekord pro %s: %d!\n", key, bestScore);
+    }
+}
 
 // ---------------------------------------------------------
 // 1. Task: Wi-Fi a WebServer (Poběží na Core 0)
@@ -270,106 +295,222 @@ void Task_Sensors(void *pvParameters) {
         // Kontrola otočení rotačního enkodéru pro okamžitou manuální změnu módu
         globalState.checkModeChange();
 
-        if (currentMode == MODE_SLEEP) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-
         // -------------------------------------------------------------
-        // 1. NEJVYŠŠÍ PRIORITA: MĚŘENÍ A INTEGRACE GYROSKOPU LSM6DS3
+        // VÝKONNÁ LOGIKA PODLE AKTUÁLNÍHO MÓDU (State Machine)
         // -------------------------------------------------------------
-        // Běží v každém 10ms cyklu (~100 Hz vzorkování) pro naprosto
-        // plynulou a přesnou numerickou integraci bez ztráty pohybu!
-        sensorManager.readIMU();
+        switch (currentMode) {
 
-        // -------------------------------------------------------------
-        // 2. RYCHLÉ SENZORY A INDIKÁTORY (každých 40 ms = 25 Hz)
-        // -------------------------------------------------------------
-        if (now - lastOtherSensors >= 40) {
-            lastOtherSensors = now;
-
-            sensorManager.readVL53L0X();
-            sensorManager.readIRDistance();
-            sensorManager.readIRObstacle();
-            sensorManager.readPhotoresistors();
-            sensorManager.readTopButton();
-            sensorManager.readColorSensor();
-
-            SensorData data = globalState.getSensorData();
-
-            // 7-segmentový displej: Zobrazuje vzdálenost v cm (Laser, IR, případně Ultrazvuk)
-            int segVal = -1;
-            if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-                segVal = data.laserDistanceMm / 10; // Přepočet mm na cm (0-200)
-            } else if (data.irDistanceCm > 0) {
-                segVal = (int)data.irDistanceCm;    // IR vzdálenost v cm (1-9)
-            } else if (data.ultrasonicDistanceCm > 0) {
-                segVal = (int)data.ultrasonicDistanceCm;
+            // =======================================================
+            case MODE_SLEEP: {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
             }
-            sensorManager.set7Segment(segVal);
 
-            // WS2812B LED pásek: Živě kopíruje barvu z barevného senzoru TCS34725
-            uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-            uint8_t stripBright = (stripColor == 0) ? 20 : 80;
-            sensorManager.setLedStripColor(stripColor, stripBright);
+            // =======================================================
+            case MODE_GYRO: {
+                // 1. Integrace gyroskopu LSM6DS3 (každých 10 ms)
+                sensorManager.readIMU();
 
-            // 3x LEDky nad senzory (D1 nad IR, D4 nad Ultrazvukem, D5 nad Laserem)
-            bool led_ir    = data.irObstacle;
-            bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
-            bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
-            sensorManager.setLeds(led_ir, led_ult, led_laser);
-        }
+                // 2. Rychlé senzory (každých 40 ms)
+                if (now - lastOtherSensors >= 40) {
+                    lastOtherSensors = now;
+                    sensorManager.readVL53L0X();
+                    sensorManager.readIRDistance();
+                    sensorManager.readIRObstacle();
+                    sensorManager.readPhotoresistors();
+                    sensorManager.readTopButton();
+                    sensorManager.readColorSensor();
 
-        // -------------------------------------------------------------
-        // 3. ULTRAZVUK HC-SR04 (každých 100 ms = 10 Hz)
-        // -------------------------------------------------------------
-        if (now - lastUltrasonic >= 100) {
-            lastUltrasonic = now;
-            sensorManager.readUltrasonic();
-        }
+                    SensorData data = globalState.getSensorData();
+                    int segVal = -1;
+                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+                        segVal = data.laserDistanceMm / 10;
+                    } else if (data.irDistanceCm > 0) {
+                        segVal = (int)data.irDistanceCm;
+                    } else if (data.ultrasonicDistanceCm > 0) {
+                        segVal = (int)data.ultrasonicDistanceCm;
+                    }
+                    sensorManager.set7Segment(segVal);
 
-        // -------------------------------------------------------------
-        // 4. ZNAKOVÝ LCD 1602 DISPLEJ (každých 250 ms = 4 Hz)
-        // -------------------------------------------------------------
-        if (now - lastLcdUpdate >= 250) {
-            lastLcdUpdate = now;
-            SensorData data = globalState.getSensorData();
-            String lcdLine1;
-            String lcdLine2;
+                    uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
+                    uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+                    sensorManager.setLedStripColor(stripColor, stripBright);
 
-            if (currentMode == MODE_GYRO) {
-                // V režimu Gyroskop zobrazujeme na LCD 1602 osy a stav drbnutí
-                char l1[17], l2[17];
-                snprintf(l1, sizeof(l1), "X:%+5.1f Y:%+5.1f", data.gyroX, data.gyroY);
-                if (data.imuShock) {
-                    snprintf(l2, sizeof(l2), "!DRBNUTI!  %3.1fg", data.imuShockG);
-                } else {
-                    snprintf(l2, sizeof(l2), "Z:%+5.1f  [KLID]", data.gyroZ);
+                    bool led_ir    = data.irObstacle;
+                    bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
+                    bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
+                    sensorManager.setLeds(led_ir, led_ult, led_laser);
                 }
-                lcdLine1 = String(l1);
-                lcdLine2 = String(l2);
-            } else {
-                // V ostatních režimech zobrazujeme teplotu a vzdálenost
-                lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
-                if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-                    lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
-                } else if (data.irDistanceCm > 0) {
-                    lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
-                } else if (data.ultrasonicDistanceCm > 0) {
-                    lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
-                } else {
-                    lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
+
+                // 3. Ultrazvuk (každých 100 ms)
+                if (now - lastUltrasonic >= 100) {
+                    lastUltrasonic = now;
+                    sensorManager.readUltrasonic();
                 }
+
+                // 4. Znakový LCD 1602 (každých 250 ms)
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    SensorData data = globalState.getSensorData();
+                    char l1[17], l2[17];
+                    snprintf(l1, sizeof(l1), "X:%+5.1f Y:%+5.1f", data.gyroX, data.gyroY);
+                    if (data.imuShock) {
+                        snprintf(l2, sizeof(l2), "!DRBNUTI!  %3.1fg", data.imuShockG);
+                    } else {
+                        snprintf(l2, sizeof(l2), "Z:%+5.1f  [KLID]", data.gyroZ);
+                    }
+                    sensorManager.writeLCD1602(String(l1), String(l2));
+                }
+
+                break;
             }
-            sensorManager.writeLCD1602(lcdLine1, lcdLine2);
-        }
 
-        // -------------------------------------------------------------
-        // 5. TEPLOTA A VLHKOST DHT11 (každých 1500 ms)
-        // -------------------------------------------------------------
-        if (now - lastDhtUpdate >= 1500) {
-            lastDhtUpdate = now;
-            sensorManager.readDHT();
+            // =======================================================
+            case MODE_GAME_SNAKE: {
+                sensorManager.readIMU();
+
+                static int step_led_counter = 3;
+
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    char l2[17];
+                    snprintf(l2, sizeof(l2), "S:%-3d  BEST:%-3d", snake.getScore(), bestScoreSnake);
+                    sensorManager.writeLCD1602("HRA: HAD (SNAKE)", String(l2));
+                }
+                if(now - lastOtherSensors >= 400) {
+                    lastOtherSensors = now;
+                    uint32_t leds[8] = {0};
+                    int appleIndex = 7; // Jablko na konci pásku (červená)
+                    leds[appleIndex] = 0xFF0000;
+
+                    step_led_counter++;
+                    if(step_led_counter > 6) step_led_counter = 0;
+
+                    // Hlava a tělo hada lezou od 0 k 6
+                    int head = step_led_counter;
+                    int body1 = head -1;
+                    int body2 = head -2;
+
+                    
+                    if(body1 >= 0) leds[body1] = 0x008800; // Tělo tmavší zelená
+                    if(body2 >= 0) leds[body2] = 0x003300;
+
+                    leds[head]  = 0x00FF00; // Hlava jasně zelená
+
+                    // Zápis na horní pásek:
+                    sensorManager.setLedStrip(leds, 25);
+
+                }
+
+                 // Vestavěná RGB LED na desce:
+                if (snake.isGameOver()) {
+                    sensorManager.setBuiltinRgb(40, 0, 0);  // Červená při Game Over
+                } else {
+                    sensorManager.setBuiltinRgb(0, 40, 0);  // Zelená když se hraje
+                }
+                    
+                break;
+            }
+
+            // =======================================================
+            case MODE_GAME_FLAPPY: {
+                sensorManager.readIMU();
+
+
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    char l2[17];
+                    snprintf(l2, sizeof(l2), "S:%-3d  BEST:%-3d", flappy.getScore(), bestScoreFlappy);
+                    sensorManager.writeLCD1602("HRA: FLAPPY BIRD", String(l2));
+                }
+                break;
+            }
+
+            // =======================================================
+            case MODE_2048: {
+                sensorManager.readIMU();
+
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    char l2[17];
+                    snprintf(l2, sizeof(l2), "S:%-4d BEST:%-4d", g2048.getScore(), bestScore2048);
+                    sensorManager.writeLCD1602("HRA: 2048", String(l2));
+                }
+                break;
+            }
+
+            // =======================================================
+            case MODE_MAIN_MENU:
+            case MODE_VZDALENOST:
+            case MODE_WIFI_SPOJENI:
+            case MODE_WIFI_DETECTION:
+            case MODE_SERVA:
+            case MODE_MOTOR:
+            case MODE_BAREVNY:
+            default: {
+                // Původní společná logika senzorů a displeje pro ostatní režimy:
+                sensorManager.readIMU();
+
+                if (now - lastOtherSensors >= 40) {
+                    lastOtherSensors = now;
+                    sensorManager.readVL53L0X();
+                    sensorManager.readIRDistance();
+                    sensorManager.readIRObstacle();
+                    sensorManager.readPhotoresistors();
+                    sensorManager.readTopButton();
+                    sensorManager.readColorSensor();
+
+                    SensorData data = globalState.getSensorData();
+                    int segVal = -1;
+                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+                        segVal = data.laserDistanceMm / 10;
+                    } else if (data.irDistanceCm > 0) {
+                        segVal = (int)data.irDistanceCm;
+                    } else if (data.ultrasonicDistanceCm > 0) {
+                        segVal = (int)data.ultrasonicDistanceCm;
+                    }
+                    sensorManager.set7Segment(segVal);
+
+                    sensorManager.setBuiltinRgb(0, 0, 0);
+
+                    uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
+                    uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+                    sensorManager.setLedStripColor(stripColor, stripBright);
+
+                    bool led_ir    = data.irObstacle;
+                    bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
+                    bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
+                    sensorManager.setLeds(led_ir, led_ult, led_laser);
+                }
+
+                if (now - lastUltrasonic >= 100) {
+                    lastUltrasonic = now;
+                    sensorManager.readUltrasonic();
+                }
+
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    SensorData data = globalState.getSensorData();
+                    String lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
+                    String lcdLine2;
+                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
+                        lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
+                    } else if (data.irDistanceCm > 0) {
+                        lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
+                    } else if (data.ultrasonicDistanceCm > 0) {
+                        lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
+                    } else {
+                        lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
+                    }
+                    sensorManager.writeLCD1602(lcdLine1, lcdLine2);
+                }
+
+                if (now - lastDhtUpdate >= 1500) {
+                    lastDhtUpdate = now;
+                    sensorManager.readDHT();
+                }
+                break;
+            }
         }
 
         // -------------------------------------------------------------
@@ -1155,21 +1296,9 @@ void Task_Display_UI(void *pvParameters) {
 
                 for (int i = 0; i < 5; i++) g2048_lastBtn[i] = data.btnDown[i];
                 
-                // Demo autopilot pro 2048: Pokud nikdo nehraje po dobu 1.5s, uděláme tah náhodným směrem každých 800 ms
-                if (now2048 - lastG2048Action > 1500) {
-                    static unsigned long lastAutoStep = 0;
-                    if (now2048 - lastAutoStep >= 800) {
-                        lastAutoStep = now2048;
-                        int dir = random(0, 4);
-                        if (dir == 0) g2048.moveUp();
-                        else if (dir == 1) g2048.moveDown();
-                        else if (dir == 2) g2048.moveLeft();
-                        else g2048.moveRight();
-                    }
-                }
-
                 // Překreslí se POUZE když si hra vyžádá překreslení (tzn. změnil se stav)
                 if (g2048.pohyb) {
+                    checkAndUpdateHighScore("2048", g2048.getScore(), bestScore2048);
                     g2048.draw();
                     g2048.pohyb = false; // Sníme flag, abychom nekreslili pořád
                 }
@@ -1626,27 +1755,47 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 unsigned long aktualniCas = millis();
                 delay = 10;
+                bool boost = false;
                 SensorData data = globalState.getSensorData();
                 static bool snake_lastBtn[5] = {false, false, false, false, false};
                 static unsigned long lastSnakeAction = 0;
+                static unsigned long inputHoldStartTime = 0;
 
-                bool snakeUserMove = false;
-                // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT
-                if (data.btnDown[BTN_DOWN_UP] && !snake_lastBtn[BTN_DOWN_UP])          { snake.goUp();    snakeUserMove = true; }
-                if (data.btnDown[BTN_DOWN_DOWN] && !snake_lastBtn[BTN_DOWN_DOWN])      { snake.goDown();  snakeUserMove = true; }
-                if (data.btnDown[BTN_DOWN_LEFT] && !snake_lastBtn[BTN_DOWN_LEFT])      { snake.goLeft();  snakeUserMove = true; }
-                if (data.btnDown[BTN_DOWN_RIGHT] && !snake_lastBtn[BTN_DOWN_RIGHT])    { snake.goRight(); snakeUserMove = true; }
+                if (!data.switch1) {
 
-                // Ovládání joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
-                if (data.joyY < 1200)      { snake.goUp();    snakeUserMove = true; }
-                else if (data.joyY > 2800) { snake.goDown();  snakeUserMove = true; }
-                if (data.joyX < 1200)      { snake.goLeft();  snakeUserMove = true; }
-                else if (data.joyX > 2800) { snake.goRight(); snakeUserMove = true; }
+                    bool snakeUserMove = false;
+                    // Ovládání směru hada tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT
+                    if (data.btnDown[BTN_DOWN_UP] && !snake_lastBtn[BTN_DOWN_UP])          { snake.goUp();    snakeUserMove = true; }
+                    if (data.btnDown[BTN_DOWN_DOWN] && !snake_lastBtn[BTN_DOWN_DOWN])      { snake.goDown();  snakeUserMove = true; }
+                    if (data.btnDown[BTN_DOWN_LEFT] && !snake_lastBtn[BTN_DOWN_LEFT])      { snake.goLeft();  snakeUserMove = true; }
+                    if (data.btnDown[BTN_DOWN_RIGHT] && !snake_lastBtn[BTN_DOWN_RIGHT])    { snake.goRight(); snakeUserMove = true; }
 
-                if (snakeUserMove) {
-                    lastSnakeAction = aktualniCas;
+                    // Ovládání joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
+                    if (data.joyY < 1200)      { snake.goUp();    snakeUserMove = true; }
+                    else if (data.joyY > 2800) { snake.goDown();  snakeUserMove = true; }
+                    if (data.joyX < 1200)      { snake.goLeft();  snakeUserMove = true; }
+                    else if (data.joyX > 2800) { snake.goRight(); snakeUserMove = true; }
+
+                    // Detekce aktivního držení směru pro BOOST (tlačítka i joystick):
+                    bool anyInputHeld = (data.btnDown[BTN_DOWN_UP] || data.btnDown[BTN_DOWN_DOWN] ||
+                                        data.btnDown[BTN_DOWN_LEFT] || data.btnDown[BTN_DOWN_RIGHT] ||
+                                        data.joyX < 1200 || data.joyX > 2800 ||
+                                        data.joyY < 1200 || data.joyY > 2800);
+
+                    if (anyInputHeld) {
+                        if (inputHoldStartTime == 0) {
+                            inputHoldStartTime = aktualniCas; // Zaznamenáme čas začátku držení
+                        } else if (aktualniCas - inputHoldStartTime >= 300) {
+                            boost = true; // Držíme směr déle než 300 ms -> aktivujeme Boost!
+                        }
+                    } else {
+                        inputHoldStartTime = 0; // Uvolněno -> reset časovače Boostu
+                    }
+
+                    if (snakeUserMove) {
+                        lastSnakeAction = aktualniCas;
+                    }
                 }
-
                 // Restart hry po Game Over stiskem středového tlačítka (CENTER / BTN2) nebo joysticku
                 if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || data.joyBtn) {
                     lastSnakeAction = aktualniCas;
@@ -1656,14 +1805,16 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 for (int i = 0; i < 5; i++) snake_lastBtn[i] = data.btnDown[i];
 
-                // Demo autopilot pro hada: pokud je Game Over a nikdo nehraje déle než 2s, automaticky restartujeme hru
-                if (snake.isGameOver() && (aktualniCas - lastSnakeAction > 2000)) {
-                    snake.reset();
-                }
 
-                if (aktualniCas - casPoslednihoKroku >= 150) {
+                if (aktualniCas - casPoslednihoKroku >= (boost ? 80 : 150)) {
+                    if(data.switch1){
+                        snake.autoStep(); // Autonomní mód
+                    }
                     casPoslednihoKroku = aktualniCas;
                     snake.update();
+                    if(!data.switch1){
+                        checkAndUpdateHighScore("snake", snake.getScore(), bestScoreSnake);
+                    }
                     snake.draw();
                 }
                 break;
@@ -1694,23 +1845,10 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 flappy_lastBtn = jumpPress;
 
-                // Demo autopilot pro Flappy: Pokud uživatel nehraje, ptáček občas skočí a při Game Over se po 1.5s restartuje
-                if (aktualniCasFlappy - lastFlappyAction > 1500) {
-                    if (flappy.getGameOver()) {
-                        flappy.reset();
-                        lastFlappyAction = aktualniCasFlappy;
-                    } else {
-                        static unsigned long lastAutoJump = 0;
-                        if (aktualniCasFlappy - lastAutoJump >= 500) {
-                            lastAutoJump = aktualniCasFlappy;
-                            flappy.jump();
-                        }
-                    }
-                }
-
                 if (aktualniCasFlappy - casPoslednihoKroku >= 40) {
                     casPoslednihoKroku = aktualniCasFlappy;
                     flappy.update();
+                    checkAndUpdateHighScore("flappy", flappy.getScore(), bestScoreFlappy);
                     flappy.draw();
                 }
                 break;
@@ -1737,6 +1875,8 @@ void setup() {
         Serial.println("[VAROVANI] Nektery modul selhal, presto pokracuji ve startu systemu...");
     }
 
+    loadHighScores();
+
     snake.reset();
     flappy.reset();
 
@@ -1744,7 +1884,7 @@ void setup() {
     // Argumenty: Funkce, Název pro debug, Velikost paměti (Stack), Parametry, Priorita, Zvláštní Handle, ID Jádra
 
     xTaskCreatePinnedToCore(Task_WiFi_Web, "WiFi_Web", 8192, NULL, 1, NULL, 0); // Core 0
-    xTaskCreatePinnedToCore(Task_Demo_Autopilot, "Demo_Autopilot", 4096, NULL, 1, NULL, 0); // Core 0 (Automatické střídání všech módů a her)
+    // xTaskCreatePinnedToCore(Task_Demo_Autopilot, "Demo_Autopilot", 4096, NULL, 1, NULL, 0); // Vypnuto: pouze manuální přepínání
     
 #ifdef ENABLE_UART_ESP
     xTaskCreatePinnedToCore(Task_UART, "UART_Top", 4096, NULL, 2, NULL, 0); // Core 0 (Reálná UART komunikace se spodním panelem)

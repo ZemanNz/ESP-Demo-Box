@@ -48,6 +48,9 @@ public:
     void setLedStripColor(uint32_t color, uint8_t brightness = 60);
     void setLedStripPixel(uint8_t index, uint32_t color);
 
+    // Vestavěná RGB LED na desce ESP32-S3 (GPIO 38)
+    void setBuiltinRgb(uint8_t r, uint8_t g, uint8_t b);
+
     // Pasivní bzučák (Spustí/zastaví tón a uloží stav do SensorData)
     void setBuzzer(bool active, uint16_t freq = 1000);
     void beep(uint16_t freq = 1000, uint32_t durationMs = 100);

@@ -28,6 +28,7 @@ extern volatile bool g_imuHwInterruptFired;
 #ifdef ENABLE_WS2812B
   #include <Adafruit_NeoPixel.h>
   extern Adafruit_NeoPixel strip;
+  extern Adafruit_NeoPixel builtinPixel;
 #endif
 
 #ifdef ENABLE_LCD1602
@@ -429,6 +430,13 @@ void SensorManager::setLedStripPixel(uint8_t index, uint32_t color) {
     strip.show();
 #endif
     globalState.updateLedStripTopLed(index, color); // Uloží stav do SensorData
+}
+
+void SensorManager::setBuiltinRgb(uint8_t r, uint8_t g, uint8_t b) {
+#ifdef ENABLE_WS2812B
+    builtinPixel.setPixelColor(0, builtinPixel.Color(r, g, b));
+    builtinPixel.show();
+#endif
 }
 
 // Pasivní bzučák

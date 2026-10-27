@@ -133,6 +133,9 @@ void Task_Sensors(void *pvParameters) {
     BottomInputs start = globalState.getInputs();
     int last_stupit_angle = map(constrain((int)start.potentiometer, 0, 4095), 0, 4095, 172, 0);
 
+    int classicServoAngle = last_stupit_angle;
+    int8_t contSpeed = 0;
+
     for (;;) {
         // 1. Přečteme veškeré vstupy (Joystick, Pot, Tlačítka, Switche, Enkodér, Dorazy)
         sensorManager.updateAllInputs();
@@ -266,10 +269,56 @@ void Task_Sensors(void *pvParameters) {
                 globalState.setMode(MODE_MAIN_MENU);
                 break;
             }
+
+            case MODE_GAME_SNAKE: {
+                // Hadí animace na spodním pásku (běží opačným směrem než na horním panelu)
+                static unsigned long last_snake_led = 0;
+                static int step_snake_counter = 5;
+
+                if (now - last_snake_led >= 400) {
+                    last_snake_led = now;
+                    uint32_t leds[8] = {0};
+                    int appleIndex = 0; // Jablko na začátku pásku (červená)
+                    leds[appleIndex] = 0xFF0000;
+
+                    step_snake_counter--;
+                    if (step_snake_counter < 1) step_snake_counter = 7;
+
+                    int head = step_snake_counter;
+                    int body1 = head + 1;
+                    int body2 = head + 2;
+
+                    if (body1 <= 7) leds[body1] = 0x008800; // Tělo tmavší zelená
+                    if (body2 <= 7) leds[body2] = 0x003300;
+                    leds[head] = 0x00FF00;                 // Hlava jasně zelená
+
+                    sensorManager.setLedStrip(leds, 25);
+                }
+
+                // V Snake módu joystick řídí hada, kontinuální servo tedy stojí:
+                contSpeed = 0;
+                sensorManager.setServoCont(0);
+
+                // Klasické servo potenciometrem:
+                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+                    last_stupit_angle = classicServoAngle;
+                    sensorManager.setServoClassic(classicServoAngle);
+                }
+
+                // Chytré servo přepínačem Switch 2:
+                int currentSwitch2 = in.switch2 ? 1 : 0;
+                if (currentSwitch2 != lastSwitch2) {
+                    lastSwitch2 = currentSwitch2;
+                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    sensorManager.setSmartServo(smartTargetDeg);
+                }
+                break;
+            }
+
             case MODE_MAIN_MENU:
             case MODE_GYRO:
             case MODE_BAREVNY:
-            case MODE_GAME_SNAKE:
             case MODE_GAME_FLAPPY:
             case MODE_2048:
             case MODE_VZDALENOST:
@@ -277,112 +326,99 @@ void Task_Sensors(void *pvParameters) {
             case MODE_WIFI_DETECTION:
             case MODE_SERVA:
             case MODE_MOTOR:
-
-            // -----------------------------------------------------------------
-            // Řízení klasického (hloupého) serva potenciometrem (0 až 180°):
-            // -----------------------------------------------------------------
-            int classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
-            if(classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)){
-                last_stupit_angle = classicServoAngle;
-                sensorManager.setServoClassic(classicServoAngle);
-            }
-
-            // -----------------------------------------------------------------
-            // Řízení chytrého serva LX-16A přepínačem Switch 2 (s LEDkou):
-            // Zapnutý (ON / 1) -> zmáčkne se na SMART_SERVO_MAX_DEG (70°)
-            // Vypnutý (OFF / 0) -> roztáhne se na SMART_SERVO_MIN_DEG (0°)
-            // Příkaz se pošle pouze při změně stavu přepínače, aby AutoStop mohl pracovat!
-            // -----------------------------------------------------------------
-            int currentSwitch2 = in.switch2 ? 1 : 0;
-            if (currentSwitch2 != lastSwitch2) {
-                lastSwitch2 = currentSwitch2;
-                smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
-                sensorManager.setSmartServo(smartTargetDeg);
-                Serial.printf("[SMART_SERVO] Prepinac SW2: %s -> cil: %d deg\n",
-                            in.switch2 ? "ON (Zmacknuto)" : "OFF (Roztazeno)", smartTargetDeg);
-            }
-
-            // -----------------------------------------------------------------
-            // Řízení kontinuálního 360° serva joystickem (osa X):
-            // Mrtvá zóna kolem středu (1800 až 2200) -> 0 % rychlost (klid)
-            // Doleva (X: 1800 -> 0)    -> plynule rychlost 0 % až +100 % (směr k limitMin)
-            // Doprava (X: 2200 -> 4095) -> plynule rychlost 0 % až -100 % (směr k limitMax)
-            // -----------------------------------------------------------------
-            int8_t contSpeed = 0;
-            if (in.joyX < 1800) {
-                contSpeed = map(constrain((int)in.joyX, 0, 1800), 1800, 0, 0, 100);
-            } else if (in.joyX > 2200) {
-                contSpeed = map(constrain((int)in.joyX, 2200, 4095), 2200, 4095, 0, -100);
-            } else {
-                contSpeed = 0;
-            }
-
-            // Pokud je sepnut levý doraz (limitMin / GPIO 25), nepovolíme jízdu doleva
-            if (in.limitMin && contSpeed > 0) {
-                contSpeed = 0;
-            }
-            // Pokud je sepnut pravý doraz (limitMax / GPIO 35), nepovolíme jízdu doprava
-            if (in.limitMax && contSpeed < 0) {
-                contSpeed = 0;
-            }
-
-            sensorManager.setServoCont(contSpeed);
-
-            // 2. Periodický přehledný výpis do Serial Monitoru (každých 250 ms)
-            if (now - lastPrintTime >= 250) {
-                lastPrintTime = now;
-
-                Serial.printf("[TEST] POT: %4d -> CLAS: %3d deg | SW2: %s -> SMART: %2d deg | JOY: X=%4d (CONT: %+4d%%) | BTN: [%d %d %d %d %d] | LIMIT: [MIN=%d MAX=%d]\n",
-                            in.potentiometer,
-                            classicServoAngle,
-                            in.switch2 ? "ON" : "OFF",
-                            smartTargetDeg,
-                            in.joyX, contSpeed,
-                            in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
-                            in.limitMin ? 1 : 0, in.limitMax ? 1 : 0);
-
-                // 3. Živé zobrazení na OLED displeji
-                char line1[22];
-                char line2[22];
-                char line3[22];
-                char line4[22];
-                // Řádek 1: Klasické servo a potenciometr
-                snprintf(line1, sizeof(line1), "Pot:%4d Srv:%3d\xF7", in.potentiometer, classicServoAngle);
-                // Řádek 2: Chytré servo a přepínač SW2
-                snprintf(line2, sizeof(line2), "SW2:%s Smart:%2d\xF7", in.switch2 ? "ON " : "OFF", smartTargetDeg);
-                // Řádek 3: Joystick a kontinuální servo
-                snprintf(line3, sizeof(line3), "JoyX:%4d Cont:%+3d%%", in.joyX, contSpeed);
-                // Řádek 4: Koncové spínače a tlačítka
-                snprintf(line4, sizeof(line4), "Lim:%d,%d Btn:%d%d%d%d%d",
-                        in.limitMin, in.limitMax,
-                        in.btnDown[0], in.btnDown[1], in.btnDown[2], in.btnDown[3], in.btnDown[4]);
-                sensorManager.updateOled(line1, line2, line3, line4);
-
-                // 4. Efekt plynulé změny barvy na LED pásku
-                uint32_t colors[8];
-                for (int i = 0; i < 8; i++) {
-                    uint8_t hue = (ledHue + (i * 32)) & 255;
-                    // Převod HSV/Hue na 24-bit RGB barvu
-                    uint8_t region = hue / 43;
-                    uint8_t remainder = (hue - (region * 43)) * 6;
-                    uint8_t q = 255 - remainder;
-                    uint8_t t = remainder;
-                    uint8_t r = 0, g = 0, b = 0;
-                    switch (region) {
-                        case 0: r = 255; g = t; b = 0; break;
-                        case 1: r = q; g = 255; b = 0; break;
-                        case 2: r = 0; g = 255; b = t; break;
-                        case 3: r = 0; g = q; b = 255; break;
-                        case 4: r = t; g = 0; b = 255; break;
-                        default: r = 255; g = 0; b = q; break;
-                    }
-                    colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            default: {
+                // -----------------------------------------------------------------
+                // Řízení klasického (hloupého) serva potenciometrem (0 až 180°):
+                // -----------------------------------------------------------------
+                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+                    last_stupit_angle = classicServoAngle;
+                    sensorManager.setServoClassic(classicServoAngle);
                 }
-                sensorManager.setLedStrip(colors, 20);
-                ledHue += 5;
-            }
 
-            break;
+                // -----------------------------------------------------------------
+                // Řízení chytrého serva LX-16A přepínačem Switch 2 (s LEDkou):
+                // -----------------------------------------------------------------
+                int currentSwitch2 = in.switch2 ? 1 : 0;
+                if (currentSwitch2 != lastSwitch2) {
+                    lastSwitch2 = currentSwitch2;
+                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    sensorManager.setSmartServo(smartTargetDeg);
+                    Serial.printf("[SMART_SERVO] Prepinac SW2: %s -> cil: %d deg\n",
+                                in.switch2 ? "ON (Zmacknuto)" : "OFF (Roztazeno)", smartTargetDeg);
+                }
+
+                // -----------------------------------------------------------------
+                // Řízení kontinuálního 360° serva joystickem (osa X):
+                // -----------------------------------------------------------------
+                if (in.joyX < 1800) {
+                    contSpeed = map(constrain((int)in.joyX, 0, 1800), 1800, 0, 0, 100);
+                } else if (in.joyX > 2200) {
+                    contSpeed = map(constrain((int)in.joyX, 2200, 4095), 2200, 4095, 0, -100);
+                } else {
+                    contSpeed = 0;
+                }
+
+                // Koncové dorazy:
+                if (in.limitMin && contSpeed > 0) contSpeed = 0;
+                if (in.limitMax && contSpeed < 0) contSpeed = 0;
+
+                sensorManager.setServoCont(contSpeed);
+
+                // Efekt plynulé změny barvy na LED pásku v ostatních módech (každých 250 ms spolu s výpisem)
+                if (now - lastPrintTime >= 250) {
+                    uint32_t colors[8];
+                    for (int i = 0; i < 8; i++) {
+                        uint8_t hue = (ledHue + (i * 32)) & 255;
+                        uint8_t region = hue / 43;
+                        uint8_t remainder = (hue - (region * 43)) * 6;
+                        uint8_t q = 255 - remainder;
+                        uint8_t t = remainder;
+                        uint8_t r = 0, g = 0, b = 0;
+                        switch (region) {
+                            case 0: r = 255; g = t; b = 0; break;
+                            case 1: r = q; g = 255; b = 0; break;
+                            case 2: r = 0; g = 255; b = t; break;
+                            case 3: r = 0; g = q; b = 255; break;
+                            case 4: r = t; g = 0; b = 255; break;
+                            default: r = 255; g = 0; b = q; break;
+                        }
+                        colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+                    }
+                    sensorManager.setLedStrip(colors, 20);
+                    ledHue += 5;
+                }
+                break;
+            }
+        }
+
+        // =================================================================
+        // SPOLEČNÝ VÝPIS A OLED DISPLEJ (probíhá pro všechny aktivní módy)
+        // =================================================================
+        if (currentMode != MODE_SLEEP && (now - lastPrintTime >= 250)) {
+            lastPrintTime = now;
+
+            Serial.printf("[TEST] POT: %4d -> CLAS: %3d deg | SW2: %s -> SMART: %2d deg | JOY: X=%4d (CONT: %+4d%%) | BTN: [%d %d %d %d %d] | LIMIT: [MIN=%d MAX=%d]\n",
+                        in.potentiometer,
+                        classicServoAngle,
+                        in.switch2 ? "ON" : "OFF",
+                        smartTargetDeg,
+                        in.joyX, contSpeed,
+                        in.btnDown[0] ? 1 : 0, in.btnDown[1] ? 1 : 0, in.btnDown[2] ? 1 : 0, in.btnDown[3] ? 1 : 0, in.btnDown[4] ? 1 : 0,
+                        in.limitMin ? 1 : 0, in.limitMax ? 1 : 0);
+
+            // Živé zobrazení na OLED displeji
+            char line1[22];
+            char line2[22];
+            char line3[22];
+            char line4[22];
+            snprintf(line1, sizeof(line1), "Pot:%4d Srv:%3d\xF7", in.potentiometer, classicServoAngle);
+            snprintf(line2, sizeof(line2), "SW2:%s Smart:%2d\xF7", in.switch2 ? "ON " : "OFF", smartTargetDeg);
+            snprintf(line3, sizeof(line3), "JoyX:%4d Cont:%+3d%%", in.joyX, contSpeed);
+            snprintf(line4, sizeof(line4), "Lim:%d,%d Btn:%d%d%d%d%d",
+                    in.limitMin, in.limitMax,
+                    in.btnDown[0], in.btnDown[1], in.btnDown[2], in.btnDown[3], in.btnDown[4]);
+            sensorManager.updateOled(line1, line2, line3, line4);
         }
 
         vTaskDelay(pdMS_TO_TICKS(20)); // Perioda čtení vstupů 20 ms (50 Hz)

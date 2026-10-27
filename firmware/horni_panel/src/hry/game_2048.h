@@ -23,6 +23,7 @@ public:
     void moveDown();
 
     Game2048State getState() const { return currentState; }
+    int getScore() const { return score; }
     
     // Uživatelova proměnná pro detekci pohybu
     bool pohyb;

@@ -20,6 +20,7 @@ public:
     void reset();
 
     bool getGameOver() const { return isGameOver; }
+    int getScore() const { return score; }
 
 private:
     void spawn_next_Obstacle();
