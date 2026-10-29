@@ -292,7 +292,7 @@ void Task_Sensors(void *pvParameters) {
                     if (body2 <= 7) leds[body2] = 0x003300;
                     leds[head] = 0x00FF00;                 // Hlava jasně zelená
 
-                    sensorManager.setLedStrip(leds, 25);
+                    sensorManager.setLedStrip(leds, 8);
                 }
 
                 // V Snake módu joystick řídí hada, kontinuální servo tedy stojí:
@@ -316,11 +316,180 @@ void Task_Sensors(void *pvParameters) {
                 break;
             }
 
+            case MODE_GAME_TETRIS: {
+                // Spodní LED pásek v Tetrisu: 1. LED (index 0) vypnutá, zbylých 7 LED podle barev tetromin
+                // 1: I (Azurová), 2: J (Modrá), 3: L (Oranžová), 4: O (Žlutá), 5: S (Zelená), 6: T (Fialová), 7: Z (Červená)
+                static const uint32_t TETRIS_PALETTE[8] = {
+                    0x000000, // LED 0: Vypnutá
+                    0x00FFFF, // LED 1: I - Azurová
+                    0x0000FF, // LED 2: J - Modrá
+                    0xFFA500, // LED 3: L - Oranžová
+                    0xFFFF00, // LED 4: O - Žlutá
+                    0x00FF00, // LED 5: S - Zelená
+                    0x800080, // LED 6: T - Fialová
+                    0xFF0000  // LED 7: Z - Červená
+                };
+
+                static unsigned long last_tetris_strip_update = 0;
+                if (now - last_tetris_strip_update >= 500) {
+                    last_tetris_strip_update = now;
+                    sensorManager.setLedStrip(TETRIS_PALETTE, 9); // Velmi jemná neoslňující intenzita
+                }
+
+                // -----------------------------------------------------------------
+                // Řízení klasického (hloupého) serva potenciometrem (0 až 180°):
+                // -----------------------------------------------------------------
+                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+                    last_stupit_angle = classicServoAngle;
+                    sensorManager.setServoClassic(classicServoAngle);
+                }
+
+                // Chytré servo přepínačem Switch 2:
+                int currentSwitch2 = in.switch2 ? 1 : 0;
+                if (currentSwitch2 != lastSwitch2) {
+                    lastSwitch2 = currentSwitch2;
+                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    sensorManager.setSmartServo(smartTargetDeg);
+                }
+
+                // V Tetrisu kontinuální servo stojí:
+                contSpeed = 0;
+                sensorManager.setServoCont(0);
+                break;
+            }
+
+            case MODE_GAME_FLAPPY: {
+                // Spodní LED pásek u Flappy Birda: zrcadleně k hornímu panelu
+                // 1 žlutý bod (ptáček) se posouvá zprava doleva, 2 zelené body (trubky) zleva doprava, pak se otočí
+                static unsigned long last_flappy_strip = 0;
+                static int flappy_birdPos = 7;
+                static int flappy_birdDir = -1;
+                static int flappy_pipePos = 0;
+                static int flappy_pipeDir = 1;
+
+                if (now - last_flappy_strip >= 140) {
+                    last_flappy_strip = now;
+                    uint32_t stripLeds[8] = {0};
+
+                    // Překážka: 2 zelené body
+                    if (flappy_pipePos >= 0 && flappy_pipePos < 8) stripLeds[flappy_pipePos] = 0x00FF00;
+                    if (flappy_pipePos + 1 >= 0 && flappy_pipePos + 1 < 8) stripLeds[flappy_pipePos + 1] = 0x00FF00;
+
+                    // Ptáček: 1 žlutý bod (má přednost)
+                    if (flappy_birdPos >= 0 && flappy_birdPos < 8) stripLeds[flappy_birdPos] = 0xFFFF00;
+
+                    sensorManager.setLedStrip(stripLeds, 8); // Jemná intenzita 8
+
+                    flappy_birdPos += flappy_birdDir;
+                    flappy_pipePos += flappy_pipeDir;
+
+                    if (flappy_birdPos <= 0 && flappy_pipePos >= 7) {
+                        flappy_birdDir = 1;
+                        flappy_pipeDir = -1;
+                    } else if (flappy_birdPos >= 7 && flappy_pipePos <= 0) {
+                        flappy_birdDir = -1;
+                        flappy_pipeDir = 1;
+                    }
+                }
+
+                // Klasické servo potenciometrem:
+                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+                    last_stupit_angle = classicServoAngle;
+                    sensorManager.setServoClassic(classicServoAngle);
+                }
+
+                // Chytré servo přepínačem Switch 2:
+                int currentSwitch2 = in.switch2 ? 1 : 0;
+                if (currentSwitch2 != lastSwitch2) {
+                    lastSwitch2 = currentSwitch2;
+                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    sensorManager.setSmartServo(smartTargetDeg);
+                }
+
+                // Kontinuální servo stojí:
+                contSpeed = 0;
+                sensorManager.setServoCont(0);
+                break;
+            }
+
+            case MODE_2048: {
+                // Spodní LED pásek u 2048:
+                // Na bocích začíná dvojice stejně barevných LED [0,1] a [6,7],
+                // posouvá se doprostřed [1,2] & [5,6] -> [2,3] & [4,5],
+                // a až do sebe uprostřed narazí, změní se na dvojici s novou barvou (simulace sloučení dlaždic)!
+                static unsigned long last_2048_strip = 0;
+                static int animStep = 0;
+                static int colorStage = 0;
+
+                static const uint32_t STAGE_COLORS[8] = {
+                    0x00FFFF, // 2: Azurová
+                    0x0000FF, // 4: Modrá
+                    0x00FF00, // 8: Zelená
+                    0xFFFF00, // 16: Žlutá
+                    0xFFA500, // 32: Oranžová
+                    0xFF0000, // 64: Červená
+                    0xFF00FF, // 128: Magenta
+                    0xFFD700  // 2048: Zlatá
+                };
+
+                if (now - last_2048_strip >= 600) {
+                    last_2048_strip = now;
+                    uint32_t stripLeds[8] = {0};
+                    uint32_t curCol = STAGE_COLORS[colorStage];
+                    uint32_t nextCol = STAGE_COLORS[(colorStage + 1) % 8];
+
+                    if (animStep == 0) {
+                        // Krok 0: Dvojice na vnějších bocích [0,1] a [6,7]
+                        stripLeds[0] = curCol; stripLeds[1] = curCol;
+                        stripLeds[6] = curCol; stripLeds[7] = curCol;
+                    } else if (animStep == 1) {
+                        // Krok 1: Posun o krok blíž ke středu [1,2] a [5,6]
+                        stripLeds[1] = curCol; stripLeds[2] = curCol;
+                        stripLeds[5] = curCol; stripLeds[6] = curCol;
+                    } else if (animStep == 2) {
+                        // Krok 2: Těsně před srážkou [2,3] a [4,5]
+                        stripLeds[2] = curCol; stripLeds[3] = curCol;
+                        stripLeds[4] = curCol; stripLeds[5] = curCol;
+                    } else if (animStep == 3) {
+                        // Krok 3: Srážka uprostřed! Změna hodnoty -> nová barva ve středu [3,4]
+                        stripLeds[3] = nextCol; stripLeds[4] = nextCol;
+                    }
+
+                    sensorManager.setLedStrip(stripLeds, 8); // Jemná intenzita 8
+
+                    animStep++;
+                    if (animStep > 3) {
+                        animStep = 0;
+                        colorStage = (colorStage + 1) % 8; // Přechod na další barvu pro novou dvojici
+                    }
+                }
+
+                // Klasické servo potenciometrem:
+                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+                    last_stupit_angle = classicServoAngle;
+                    sensorManager.setServoClassic(classicServoAngle);
+                }
+
+                // Chytré servo přepínačem Switch 2:
+                int currentSwitch2 = in.switch2 ? 1 : 0;
+                if (currentSwitch2 != lastSwitch2) {
+                    lastSwitch2 = currentSwitch2;
+                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    sensorManager.setSmartServo(smartTargetDeg);
+                }
+
+                // Kontinuální servo stojí:
+                contSpeed = 0;
+                sensorManager.setServoCont(0);
+                break;
+            }
+
             case MODE_MAIN_MENU:
             case MODE_GYRO:
             case MODE_BAREVNY:
-            case MODE_GAME_FLAPPY:
-            case MODE_2048:
             case MODE_VZDALENOST:
             case MODE_WIFI_SPOJENI:
             case MODE_WIFI_DETECTION:
@@ -385,7 +554,7 @@ void Task_Sensors(void *pvParameters) {
                         }
                         colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
                     }
-                    sensorManager.setLedStrip(colors, 20);
+                    sensorManager.setLedStrip(colors, 8);
                     ledHue += 5;
                 }
                 break;

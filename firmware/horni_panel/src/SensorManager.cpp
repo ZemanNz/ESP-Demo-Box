@@ -505,6 +505,38 @@ void SensorManager::set7Segment(int value) {
     globalState.update7Segment(value); // Uloží číslo do SensorData
 }
 
+void SensorManager::set7SegmentText(const char* text) {
+#ifdef ENABLE_74HC595
+    byte patterns[SEG_NUM_DIGITS] = {0};
+    int len = text ? strlen(text) : 0;
+
+    for (int i = 0; i < SEG_NUM_DIGITS; i++) {
+        char c = (i < len) ? text[len - 1 - i] : ' ';
+        byte pat = 0x00;
+        switch (c) {
+            case 'g': case 'G': pat = 0x6F; break; // Malé g (a, b, c, d, f, g) - liší se od 6
+            case 'L': case 'l': pat = 0x38; break; // L (d, e, f)
+            case 'O': case 'o': case '0': pat = 0x3F; break; // O
+            case 'Y': case 'y': pat = 0x6E; break; // Y (b, c, d, f, g)
+            case 'E': case 'e': pat = 0x79; break; // E (a, d, e, f, g)
+            case 'S': case 's': pat = 0x6D; break; // S (a, c, d, f, g)
+            case '-': pat = 0x40; break;
+            case ' ': pat = 0x00; break;
+            default:  pat = 0x00; break;
+        }
+        patterns[i] = pat;
+    }
+
+    digitalWrite(PIN_SEG_LATCH, LOW);
+    for (int i = 0; i < SEG_NUM_DIGITS; i++) {
+        byte p = patterns[i];
+        if (SEG_COMMON_ANODE) p = ~p;
+        shiftOut(PIN_SEG_DATA, PIN_SEG_CLK, MSBFIRST, p);
+    }
+    digitalWrite(PIN_SEG_LATCH, HIGH);
+#endif
+}
+
 // I2C LCD 1602
 void SensorManager::writeLCD1602(const char* line1, const char* line2) {
 #ifdef ENABLE_LCD1602

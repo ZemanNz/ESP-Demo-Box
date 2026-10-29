@@ -10,6 +10,7 @@
 #include "hry/snake.h"
 #include "hry/flappy_bird.h"
 #include "hry/game_2048.h"
+#include "hry/tetris.h"
 #include "wifi/WebManager.h"
 
 // ---------------------------------------------------------
@@ -19,6 +20,7 @@ SystemState globalState;
 SnakeGame snake;
 FlappyGame flappy;
 Game2048 g2048;
+TetrisGame tetris;
 WebManager webManager;
 
 // Trvalé ukládání rekordů her (NVS / Flash paměť)
@@ -26,12 +28,14 @@ Preferences gamePrefs;
 int bestScoreSnake = 0;
 int bestScoreFlappy = 0;
 int bestScore2048 = 0;
+int bestScoreTetris = 0;
 
 void loadHighScores() {
     gamePrefs.begin("scores", true); // read-only
     bestScoreSnake = gamePrefs.getInt("snake", 0);
     bestScoreFlappy = gamePrefs.getInt("flappy", 0);
     bestScore2048 = gamePrefs.getInt("2048", 0);
+    bestScoreTetris = gamePrefs.getInt("tetris", 0);
     gamePrefs.end();
 }
 
@@ -43,6 +47,14 @@ void checkAndUpdateHighScore(const char* key, int currentScore, int &bestScore) 
         gamePrefs.end();
         Serial.printf("[HIGHSCORE] Novy rekord pro %s: %d!\n", key, bestScore);
     }
+}
+
+void resetHighScore(const char* key, int &bestScore) {
+    bestScore = 0;
+    gamePrefs.begin("scores", false);
+    gamePrefs.putInt(key, 0);
+    gamePrefs.end();
+    Serial.printf("[HIGHSCORE] Rekord pro %s byl resetovan na 0!\n", key);
 }
 
 // ---------------------------------------------------------
@@ -117,11 +129,11 @@ void Task_Demo_Autopilot(void *pvParameters) {
         int requiredDuration = 15000; // Výchozí doba 15 s
         if (current == MODE_WIFI_SPOJENI || current == MODE_WIFI_DETECTION) {
             requiredDuration = 35000; // 35 s pro Wi-Fi obrazovky (QR kód, CSI detekce)
-        } else if (current == MODE_GAME_SNAKE || current == MODE_GAME_FLAPPY || current == MODE_2048) {
+        } else if (current == MODE_GAME_SNAKE || current == MODE_GAME_FLAPPY || current == MODE_2048 || current == MODE_GAME_TETRIS) {
             requiredDuration = 25000; // 25 s pro hry
         }
 
-        // 4. Automatické cyklické přepnutí na další mód (všech 11 módů včetně her)
+        // 4. Automatické cyklické přepnutí na další mód (všech 12 módů včetně her)
         if (timeInMode >= requiredDuration) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
@@ -131,7 +143,8 @@ void Task_Demo_Autopilot(void *pvParameters) {
                 case MODE_GYRO:           nextMode = MODE_GAME_SNAKE; break;
                 case MODE_GAME_SNAKE:     nextMode = MODE_GAME_FLAPPY; break;
                 case MODE_GAME_FLAPPY:    nextMode = MODE_2048; break;
-                case MODE_2048:           nextMode = MODE_VZDALENOST; break;
+                case MODE_2048:           nextMode = MODE_GAME_TETRIS; break;
+                case MODE_GAME_TETRIS:    nextMode = MODE_VZDALENOST; break;
                 case MODE_VZDALENOST:     nextMode = MODE_WIFI_SPOJENI; break;
                 case MODE_WIFI_SPOJENI:   nextMode = MODE_WIFI_DETECTION; break;
                 case MODE_WIFI_DETECTION: nextMode = MODE_SERVA; break;
@@ -333,7 +346,7 @@ void Task_Sensors(void *pvParameters) {
                     sensorManager.set7Segment(segVal);
 
                     uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-                    uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+                    uint8_t stripBright = (stripColor == 0) ? 5 : 15;
                     sensorManager.setLedStripColor(stripColor, stripBright);
 
                     bool led_ir    = data.irObstacle;
@@ -397,17 +410,21 @@ void Task_Sensors(void *pvParameters) {
 
                     leds[head]  = 0x00FF00; // Hlava jasně zelená
 
-                    // Zápis na horní pásek:
-                    sensorManager.setLedStrip(leds, 25);
+                    // Zápis na horní pásek (jemná intenzita):
+                    sensorManager.setLedStrip(leds, 8);
 
                 }
 
                  // Vestavěná RGB LED na desce:
                 if (snake.isGameOver()) {
-                    sensorManager.setBuiltinRgb(40, 0, 0);  // Červená při Game Over
+                    sensorManager.setBuiltinRgb(15, 0, 0);  // Jemná červená při Game Over
                 } else {
-                    sensorManager.setBuiltinRgb(0, 40, 0);  // Zelená když se hraje
+                    sensorManager.setBuiltinRgb(0, 5, 0);   // Jemná zelená při hře
                 }
+
+#if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
+                sensorManager.set7SegmentText(snake.isGameOver() ? " gg" : "LOL");
+#endif
                     
                 break;
             }
@@ -416,13 +433,55 @@ void Task_Sensors(void *pvParameters) {
             case MODE_GAME_FLAPPY: {
                 sensorManager.readIMU();
 
-
+                // 1. Znakový LCD 1602 displej (každých 250 ms)
                 if (now - lastLcdUpdate >= 250) {
                     lastLcdUpdate = now;
                     char l2[17];
                     snprintf(l2, sizeof(l2), "S:%-3d  BEST:%-3d", flappy.getScore(), bestScoreFlappy);
                     sensorManager.writeLCD1602("HRA: FLAPPY BIRD", String(l2));
                 }
+
+                // 2. Horní LED pásek: žlutý bod (ptáček) se posouvá, proti němu jdou 2 zelené body (trubky), pak se vymění a jdou zpět
+                if (now - lastOtherSensors >= 140) {
+                    lastOtherSensors = now;
+                    static int birdPos = 0;
+                    static int birdDir = 1;
+                    static int pipePos = 6;
+                    static int pipeDir = -1;
+
+                    uint32_t stripLeds[8] = {0};
+
+                    // Překážka: 2 zelené body
+                    if (pipePos >= 0 && pipePos < 8) stripLeds[pipePos] = 0x00FF00;
+                    if (pipePos + 1 >= 0 && pipePos + 1 < 8) stripLeds[pipePos + 1] = 0x00FF00;
+
+                    // Ptáček: 1 žlutý bod (má přednost)
+                    if (birdPos >= 0 && birdPos < 8) stripLeds[birdPos] = 0xFFFF00;
+
+                    sensorManager.setLedStrip(stripLeds, 8); // Jemná intenzita 8
+
+                    birdPos += birdDir;
+                    pipePos += pipeDir;
+
+                    if (birdPos >= 7 && pipePos <= -1) {
+                        birdDir = -1;
+                        pipeDir = 1;
+                    } else if (birdPos <= 0 && pipePos >= 6) {
+                        birdDir = 1;
+                        pipeDir = -1;
+                    }
+                }
+
+                // 3. Vestavěná RGB LED na desce: zelená při hře, červená při Game Over
+                if (flappy.getGameOver()) {
+                    sensorManager.setBuiltinRgb(15, 0, 0);  // Jemná červená při Game Over
+                } else {
+                    sensorManager.setBuiltinRgb(0, 5, 0);   // Jemná zelená při hře
+                }
+
+#if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
+                sensorManager.set7SegmentText(flappy.getGameOver() ? " gg" : "LOL");
+#endif
                 break;
             }
 
@@ -430,12 +489,93 @@ void Task_Sensors(void *pvParameters) {
             case MODE_2048: {
                 sensorManager.readIMU();
 
+                // 1. Znakový LCD 1602 displej (každých 250 ms)
                 if (now - lastLcdUpdate >= 250) {
                     lastLcdUpdate = now;
                     char l2[17];
                     snprintf(l2, sizeof(l2), "S:%-4d BEST:%-4d", g2048.getScore(), bestScore2048);
                     sensorManager.writeLCD1602("HRA: 2048", String(l2));
                 }
+
+                // 2. Horní LED pásek: svítí v barvě nejvyšší aktuálně získané hodnoty (dlaždice) na ploše
+                if (now - lastOtherSensors >= 100) {
+                    lastOtherSensors = now;
+                    int maxTile = g2048.getMaxTile();
+                    uint32_t tileColor = 0x00FFFF; // default pro 2
+                    switch (maxTile) {
+                        case 2:    tileColor = 0x00FFFF; break; // Azurová (Cyan)
+                        case 4:    tileColor = 0x0000FF; break; // Sytá modrá
+                        case 8:    tileColor = 0x00FF00; break; // Jasná zelená
+                        case 16:   tileColor = 0xFFFF00; break; // Žlutá
+                        case 32:   tileColor = 0xFFA500; break; // Oranžová
+                        case 64:   tileColor = 0xFF0000; break; // Červená
+                        case 128:  tileColor = 0xFF00FF; break; // Purpurová / Magenta
+                        case 256:  tileColor = 0xFF1493; break; // Sytě růžová (Deep Pink)
+                        case 512:  tileColor = 0x00FF80; break; // Jarní mořská zelená (Spring Green)
+                        case 1024: tileColor = 0x80FF00; break; // Limetková (Chartreuse)
+                        case 2048: tileColor = 0xFFD700; break; // Zlatá (Gold)
+                        default:   tileColor = 0xFFFFFF; break; // Bílá
+                    }
+                    sensorManager.setLedStripColor(tileColor, 8); // Jemná intenzita 8
+                }
+
+                // 3. Vestavěná RGB LED na desce: zelená při hře, červená při Game Over
+                if (g2048.getState() == G2048_GAME_OVER) {
+                    sensorManager.setBuiltinRgb(15, 0, 0);  // Jemná červená při Game Over
+                } else {
+                    sensorManager.setBuiltinRgb(0, 5, 0);   // Jemná zelená při hře
+                }
+
+#if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
+                sensorManager.set7SegmentText((g2048.getState() == G2048_GAME_OVER) ? " gg" : "LOL");
+#endif
+                break;
+            }
+
+            // =======================================================
+            case MODE_GAME_TETRIS: {
+                sensorManager.readIMU();
+
+                // 1. Znakový LCD 1602 displej (každých 250 ms)
+                if (now - lastLcdUpdate >= 250) {
+                    lastLcdUpdate = now;
+                    char l2[17];
+                    snprintf(l2, sizeof(l2), "S:%-4d BEST:%-4d", tetris.getScore(), bestScoreTetris);
+                    sensorManager.writeLCD1602("HRA: TETRIS", String(l2));
+                }
+
+                // 2. Horní LED pásek: nízkou intenzitou rozsvícený barvou aktuálního padajícího dílku
+                if (now - lastOtherSensors >= 100) {
+                    lastOtherSensors = now;
+
+                    // 0: I (Azurová), 1: J (Modrá), 2: L (Oranžová), 3: O (Žlutá), 4: S (Zelená), 5: T (Fialová), 6: Z (Červená)
+                    static const uint32_t BARVY_STRIP[7] = {
+                        0x00FFFF, // 0: I - Azurová
+                        0x0000FF, // 1: J - Modrá
+                        0xFFA500, // 2: L - Oranžová
+                        0xFFFF00, // 3: O - Žlutá
+                        0x00FF00, // 4: S - Zelená
+                        0x800080, // 5: T - Fialová
+                        0xFF0000  // 6: Z - Červená
+                    };
+
+                    int curType = tetris.getCurrentType();
+                    uint32_t barvaDilku = (curType >= 0 && curType < 7) ? BARVY_STRIP[curType] : 0x00FFFF;
+
+                    // Velmi jemná nízká intenzita (brightness = 5 z 255 pro neoslňující svit)
+                    sensorManager.setLedStripColor(barvaDilku, 5);
+                }
+
+                // 3. Vestavěná RGB LED na desce (Zelená jemně svítící při hře, Červená při Game Over)
+                if (tetris.isGameOver()) {
+                    sensorManager.setBuiltinRgb(15, 0, 0);  // Jemná červená při Game Over
+                } else {
+                    sensorManager.setBuiltinRgb(0, 5, 0);   // Jemná zelená, minimální intenzita při hře
+                }
+
+#if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
+                sensorManager.set7SegmentText(tetris.isGameOver() ? " gg" : "LOL");
+#endif
                 break;
             }
 
@@ -474,7 +614,7 @@ void Task_Sensors(void *pvParameters) {
                     sensorManager.setBuiltinRgb(0, 0, 0);
 
                     uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-                    uint8_t stripBright = (stripColor == 0) ? 20 : 80;
+                    uint8_t stripBright = (stripColor == 0) ? 5 : 15;
                     sensorManager.setLedStripColor(stripColor, stripBright);
 
                     bool led_ir    = data.irObstacle;
@@ -1263,45 +1403,203 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50;
                 SensorData data = globalState.getSensorData();
                 static bool g2048_lastBtn[5] = {false, false, false, false, false};
+                static bool g2048_lastJoyBtn = false;
                 static unsigned long lastG2048Action = 0;
+                static unsigned long lastAuto2048 = 0;
                 unsigned long now2048 = millis();
 
                 if (needsFullRedraw) {
                     g2048.reset();
+                    g2048.setBestScore(bestScore2048);
                     g2048.pohyb = true; // Vynutíme první vykreslení po startu hry
                     lastG2048Action = now2048;
                 }
 
                 bool userAction = false;
-                // Ovládání tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT, a CENTER (Reset)
-                if (data.btnDown[BTN_DOWN_UP] && !g2048_lastBtn[BTN_DOWN_UP])          { g2048.moveUp();    userAction = true; }
-                if (data.btnDown[BTN_DOWN_DOWN] && !g2048_lastBtn[BTN_DOWN_DOWN])      { g2048.moveDown();  userAction = true; }
-                if (data.btnDown[BTN_DOWN_LEFT] && !g2048_lastBtn[BTN_DOWN_LEFT])      { g2048.moveLeft();  userAction = true; }
-                if (data.btnDown[BTN_DOWN_RIGHT] && !g2048_lastBtn[BTN_DOWN_RIGHT])    { g2048.moveRight(); userAction = true; }
-                if (data.btnDown[BTN_DOWN_CENTER] && !g2048_lastBtn[BTN_DOWN_CENTER])  { g2048.reset();     userAction = true; }
-
-                // Ovládání analogovým joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
-                static bool joyMoved = false;
-                if (data.joyY < 1200 && !joyMoved)      { g2048.moveUp();    joyMoved = true; userAction = true; }
-                else if (data.joyY > 2800 && !joyMoved) { g2048.moveDown();  joyMoved = true; userAction = true; }
-                else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft();  joyMoved = true; userAction = true; }
-                else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; userAction = true; }
-                else if (data.joyX >= 1200 && data.joyX <= 2800 && data.joyY >= 1200 && data.joyY <= 2800) {
-                    joyMoved = false;
+                // Reset rekordu 2048 při současném stisku CENTER a JOYSTICKU:
+                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
+                    resetHighScore("2048", bestScore2048);
+                    g2048.setBestScore(bestScore2048);
+                    g2048.pohyb = true;
+                } else if (data.joyBtn && !g2048_lastJoyBtn) {
+                    // Stisk samotného joysticku restartuje hru
+                    g2048.reset();
+                    g2048.pohyb = true;
                 }
+                g2048_lastJoyBtn = data.joyBtn;
 
-                if (userAction) {
-                    lastG2048Action = now2048;
+                // AI Autopilot na přepínači Switch 1 (krok každých 180 ms)
+                if (data.switch1) {
+                    if (now2048 - lastAuto2048 >= 180) {
+                        lastAuto2048 = now2048;
+                        g2048.autoStep();
+                        g2048.pohyb = true;
+                    }
+                } else {
+                    // Ovládání tlačítky (D-Pad / 5 tlačítek): UP, DOWN, LEFT, RIGHT, a CENTER (Reset)
+                    if (data.btnDown[BTN_DOWN_UP] && !g2048_lastBtn[BTN_DOWN_UP])          { g2048.moveUp();    userAction = true; }
+                    if (data.btnDown[BTN_DOWN_DOWN] && !g2048_lastBtn[BTN_DOWN_DOWN])      { g2048.moveDown();  userAction = true; }
+                    if (data.btnDown[BTN_DOWN_LEFT] && !g2048_lastBtn[BTN_DOWN_LEFT])      { g2048.moveLeft();  userAction = true; }
+                    if (data.btnDown[BTN_DOWN_RIGHT] && !g2048_lastBtn[BTN_DOWN_RIGHT])    { g2048.moveRight(); userAction = true; }
+                    if (data.btnDown[BTN_DOWN_CENTER] && !g2048_lastBtn[BTN_DOWN_CENTER] && !data.joyBtn) { g2048.reset(); userAction = true; }
+
+                    // Ovládání analogovým joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
+                    static bool joyMoved = false;
+                    if (data.joyY < 1200 && !joyMoved)      { g2048.moveUp();    joyMoved = true; userAction = true; }
+                    else if (data.joyY > 2800 && !joyMoved) { g2048.moveDown();  joyMoved = true; userAction = true; }
+                    else if (data.joyX < 1200 && !joyMoved) { g2048.moveLeft();  joyMoved = true; userAction = true; }
+                    else if (data.joyX > 2800 && !joyMoved) { g2048.moveRight(); joyMoved = true; userAction = true; }
+                    else if (data.joyX >= 1200 && data.joyX <= 2800 && data.joyY >= 1200 && data.joyY <= 2800) {
+                        joyMoved = false;
+                    }
+
+                    if (userAction) {
+                        lastG2048Action = now2048;
+                    }
+
+                    for (int i = 0; i < 5; i++) g2048_lastBtn[i] = data.btnDown[i];
                 }
-
-                for (int i = 0; i < 5; i++) g2048_lastBtn[i] = data.btnDown[i];
                 
                 // Překreslí se POUZE když si hra vyžádá překreslení (tzn. změnil se stav)
                 if (g2048.pohyb) {
-                    checkAndUpdateHighScore("2048", g2048.getScore(), bestScore2048);
+                    if (!data.switch1) {
+                        checkAndUpdateHighScore("2048", g2048.getScore(), bestScore2048);
+                    }
+                    g2048.setBestScore(bestScore2048);
                     g2048.draw();
                     g2048.pohyb = false; // Sníme flag, abychom nekreslili pořád
                 }
+                break;
+            }
+
+            // =======================================================
+            // MÓD: HRA TETRIS (Následuje po 2048)
+            // =======================================================
+            case MODE_GAME_TETRIS: {
+                delay = 20; // 50 Hz smyčka pro plynulé čtení tlačítek
+                SensorData data = globalState.getSensorData();
+                static bool tetris_lastBtn[5] = {false, false, false, false, false};
+                static bool tetris_lastJoyBtn = false;
+                static unsigned long casPoslednihoKroku = 0;
+                static unsigned long lastMoveXTime = 0;
+                static int lastDirX = 0;
+                static unsigned long lastDownTime = 0;
+                static bool wasDownHeld = false;
+                static bool lastUpState = false;
+                unsigned long aktualniCas = millis();
+
+                if (needsFullRedraw) {
+                    tetris.reset();
+                    casPoslednihoKroku = aktualniCas;
+                    lastMoveXTime = 0;
+                    lastDirX = 0;
+                    lastDownTime = 0;
+                    wasDownHeld = false;
+                    lastUpState = false;
+                    tetris.draw();
+                }
+
+                // Reset rekordu při současném stisku tlačítka CENTER a JOYSTICKU
+                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
+                    resetHighScore("tetris", bestScoreTetris);
+                    tetris.draw();
+                } else if (data.joyBtn && !tetris_lastJoyBtn) {
+                    // Pouze stisk joysticku samotného restartuje hru
+                    tetris.reset();
+                    casPoslednihoKroku = aktualniCas;
+                    tetris.draw();
+                }
+                tetris_lastJoyBtn = data.joyBtn;
+
+                bool userMove = false;
+
+                // 1. Horizontální pohyb (Doleva / Doprava) - plynulé opakování při držení (DAS)
+                int currentDirX = 0;
+                if (data.joyX < 1200 || data.btnDown[BTN_DOWN_LEFT]) {
+                    currentDirX = -1;
+                } else if (data.joyX > 2800 || data.btnDown[BTN_DOWN_RIGHT]) {
+                    currentDirX = 1;
+                }
+
+                if (currentDirX != 0) {
+                    if (currentDirX != lastDirX) {
+                        // Okamžitý první krok při vychýlení
+                        if (currentDirX == -1) tetris.moveLeft();
+                        else tetris.moveRight();
+                        userMove = true;
+                        lastDirX = currentDirX;
+                        lastMoveXTime = aktualniCas + 170; // Úvodní zpoždění před opakováním
+                    } else if (aktualniCas >= lastMoveXTime) {
+                        // Plynulý posun během držení každých 75 ms bez nutnosti vracet joystick do nuly
+                        if (currentDirX == -1) tetris.moveLeft();
+                        else tetris.moveRight();
+                        userMove = true;
+                        lastMoveXTime = aktualniCas + 75;
+                    }
+                } else {
+                    lastDirX = 0;
+                }
+
+                // 2. Vertikální pohyb dolů (Zrychlený pád / Soft drop) - plynulé opakování při držení
+                bool isDown = (data.joyY > 2800 || data.btnDown[BTN_DOWN_DOWN]);
+                if (isDown) {
+                    if (!wasDownHeld) {
+                        tetris.update();
+                        userMove = true;
+                        wasDownHeld = true;
+                        casPoslednihoKroku = aktualniCas;
+                        lastDownTime = aktualniCas + 140; // Prodleva před sérií pádu
+                    } else if (aktualniCas >= lastDownTime) {
+                        tetris.update();
+                        userMove = true;
+                        casPoslednihoKroku = aktualniCas;
+                        lastDownTime = aktualniCas + 55;  // Plynulý pád každých 55 ms při držení
+                    }
+                } else {
+                    wasDownHeld = false;
+                }
+
+                // 3. Rotace (Nahoru) - 1 otočení na jedno vychýlení/stisk
+                bool isUp = (data.joyY < 1200 || data.btnDown[BTN_DOWN_UP]);
+                if (isUp && !lastUpState) {
+                    tetris.rotate();
+                    userMove = true;
+                }
+                lastUpState = isUp;
+
+                // 4. Hard drop (okamžitý dopad na středové tlačítko D-Padu)
+                if (data.btnDown[BTN_DOWN_CENTER] && !tetris_lastBtn[BTN_DOWN_CENTER] && !data.joyBtn) {
+                    tetris.boost();
+                    userMove = true;
+                }
+
+                // Pokud hráč pohnul kostkou, hned překreslíme a aktualizujeme skóre
+                if (userMove) {
+                    if (!data.switch1) {
+                        checkAndUpdateHighScore("tetris", tetris.getScore(), bestScoreTetris);
+                    }
+                    tetris.draw();
+                }
+
+                // 5. Automatický gravitační krok (každých 400 ms), pokud hráč nedrží pád dolů
+                int krokDelay = 400;
+                if (!isDown) {
+                    if (data.switch1) {
+                        // AI Autopilot na přepínači Switch 1 (krok každých 150 ms)
+                        if (aktualniCas - casPoslednihoKroku >= 150) {
+                            casPoslednihoKroku = aktualniCas;
+                            tetris.autoStep();
+                            tetris.draw();
+                        }
+                    } else if (aktualniCas - casPoslednihoKroku >= (unsigned long)krokDelay) {
+                        casPoslednihoKroku = aktualniCas;
+                        tetris.update();
+                        checkAndUpdateHighScore("tetris", tetris.getScore(), bestScoreTetris);
+                        tetris.draw();
+                    }
+                }
+
+                for (int i = 0; i < 5; i++) tetris_lastBtn[i] = data.btnDown[i];
                 break;
             }
 
@@ -1797,7 +2095,10 @@ void Task_Display_UI(void *pvParameters) {
                     }
                 }
                 // Restart hry po Game Over stiskem středového tlačítka (CENTER / BTN2) nebo joysticku
-                if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || data.joyBtn) {
+                // Reset rekordu při současném stisku CENTER a JOYSTICKU:
+                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
+                    resetHighScore("snake", bestScoreSnake);
+                } else if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || data.joyBtn) {
                     lastSnakeAction = aktualniCas;
                     if (snake.isGameOver()) {
                         snake.reset();
@@ -1824,6 +2125,8 @@ void Task_Display_UI(void *pvParameters) {
             case MODE_GAME_FLAPPY: {
                 if (needsFullRedraw) {
                     flappy.reset();
+                    flappy.setBestScore(bestScoreFlappy);
+                    flappy.draw();
                 }
                 unsigned long aktualniCasFlappy = millis();
                 delay = 10;
@@ -1832,6 +2135,11 @@ void Task_Display_UI(void *pvParameters) {
                 static unsigned long lastFlappyAction = 0;
 
                 // Skok nebo restart hry při stisku kteréhokoliv tlačítka D-Padu, joysticku nebo horního tlačítka
+                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
+                    resetHighScore("flappy", bestScoreFlappy);
+                    flappy.setBestScore(bestScoreFlappy);
+                    flappy.draw();
+                }
                 bool jumpPress = (data.btnDown[BTN_DOWN_UP] || data.btnDown[BTN_DOWN_CENTER] ||
                                   data.btnDown[BTN_DOWN_LEFT] || data.btnDown[BTN_DOWN_RIGHT] ||
                                   data.btnDown[BTN_DOWN_DOWN] || data.joyBtn || data.btnTop);
@@ -1839,6 +2147,7 @@ void Task_Display_UI(void *pvParameters) {
                     lastFlappyAction = aktualniCasFlappy;
                     if (flappy.getGameOver()) {
                         flappy.reset();
+                        flappy.setBestScore(bestScoreFlappy);
                     } else {
                         flappy.jump();
                     }
@@ -1847,8 +2156,14 @@ void Task_Display_UI(void *pvParameters) {
 
                 if (aktualniCasFlappy - casPoslednihoKroku >= 40) {
                     casPoslednihoKroku = aktualniCasFlappy;
+                    if (data.switch1) {
+                        flappy.autoStep(); // AI Autopilot na Switch 1
+                    }
                     flappy.update();
-                    checkAndUpdateHighScore("flappy", flappy.getScore(), bestScoreFlappy);
+                    if (!data.switch1) {
+                        checkAndUpdateHighScore("flappy", flappy.getScore(), bestScoreFlappy);
+                    }
+                    flappy.setBestScore(bestScoreFlappy);
                     flappy.draw();
                 }
                 break;

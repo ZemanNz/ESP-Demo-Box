@@ -30,6 +30,9 @@
 #define ENABLE_UART_ESP       // UART komunikace se spodním panelem (Serial1)
 #define ENABLE_WIFI_WEB       // Wi-Fi a WebServer (SoftAP + Captive Portal + WebSocket)
 
+// Zobrazení textu na 7-segmentovém displeji při hrách (" gg" při hře, "LOL" při Game Over):
+#define ENABLE_7SEG_GAME_TEXT true
+
 // Kompatibilita pro novější názvy modulů
 #define ENABLE_DHT11          ENABLE_DHT
 #define ENABLE_PHOTORES       ENABLE_PHOTORESISTORS

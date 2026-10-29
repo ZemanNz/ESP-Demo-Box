@@ -1,6 +1,7 @@
 #include "game_2048.h"
 
 Game2048::Game2048() {
+    bestScore = 0;
     reset();
 }
 
@@ -22,6 +23,26 @@ void Game2048::reset() {
 // ------------------------------------------------------------------
 // TVŮJ DOMÁCÍ ÚKOL ZAČÍNÁ TADY
 // ------------------------------------------------------------------
+
+bool Game2048::checkGameOver() {
+    // 1. Pokud existuje jakékoliv volné pole, hra pokračuje
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            if (board[x][y] == 0) return false;
+        }
+    }
+
+    // 2. Pokud je plocha plná, zkontrolujeme, zda lze ještě něco sečíst
+    for (int y = 0; y < 4; y++) {
+        for (int x = 0; x < 4; x++) {
+            if (x < 3 && board[x][y] == board[x + 1][y]) return false;
+            if (y < 3 && board[x][y] == board[x][y + 1]) return false;
+        }
+    }
+
+    // Žádné prázdné pole a žádný možný tah -> GAME OVER
+    return true;
+}
 
 // Tuto funkci si doplň sám! Měla by najít prázdné políčko (kde je 0)
 // a dát tam s 90% šancí číslo 2 a s 10% šancí číslo 4.
@@ -48,6 +69,10 @@ void Game2048::spawnRandomTile() {
                 if(prazdne[x][y]){
                     if(randomIndex == 0) {
                         board[x][y] = hodnota;
+                        // Po vložení dlaždice ihned zkontrolujeme, zda ještě zbývá nějaký tah
+                        if (checkGameOver()) {
+                            currentState = G2048_GAME_OVER;
+                        }
                         return;
                     }
                     randomIndex--;
@@ -64,6 +89,7 @@ void Game2048::spawnRandomTile() {
 // Tahové funkce (Tvoje hlavní výzva!)
 // Zkus implementovat posun všech čísel doleva a sečtení těch stejných.
 void Game2048::moveLeft() {
+    if (currentState == G2048_GAME_OVER) return;
     pohyb = false;
     for (int y = 0; y < 4; y++) {
         // Fáze 1: Gravitace doleva
@@ -106,9 +132,15 @@ void Game2048::moveLeft() {
     
     if (pohyb) {
         spawnRandomTile();
+    } else {
+        if (checkGameOver()) {
+            currentState = G2048_GAME_OVER;
+            pohyb = true;
+        }
     }
 }
 void Game2048::moveRight() {
+    if (currentState == G2048_GAME_OVER) return;
     pohyb = false;
     for (int y = 0; y < 4; y++) {
         // Fáze 1: Gravitace doprava
@@ -151,9 +183,15 @@ void Game2048::moveRight() {
     
     if (pohyb) {
         spawnRandomTile();
+    } else {
+        if (checkGameOver()) {
+            currentState = G2048_GAME_OVER;
+            pohyb = true;
+        }
     }
 }
 void Game2048::moveUp() {
+    if (currentState == G2048_GAME_OVER) return;
     pohyb = false;
     for (int x = 0; x < 4; x++) {
         
@@ -197,9 +235,15 @@ void Game2048::moveUp() {
     
     if (pohyb) {
         spawnRandomTile();
+    } else {
+        if (checkGameOver()) {
+            currentState = G2048_GAME_OVER;
+            pohyb = true;
+        }
     }
 }
 void Game2048::moveDown() {
+    if (currentState == G2048_GAME_OVER) return;
     pohyb = false;
     for (int x = 0; x < 4; x++) {
         
@@ -243,6 +287,11 @@ void Game2048::moveDown() {
 
     if (pohyb) {
         spawnRandomTile();
+    } else {
+        if (checkGameOver()) {
+            currentState = G2048_GAME_OVER;
+            pohyb = true;
+        }
     }
 }
 
@@ -251,19 +300,328 @@ void Game2048::moveDown() {
 // ------------------------------------------------------------------
 
 
-// Pomocná funkce pro barvy (můžeš si barvy upravit podle sebe)
+// Pomocná funkce pro barvy (RGB565)
 uint16_t Game2048::getColorForNumber(int num) {
     switch (num) {
-        case 0: return ST77XX_DARKGREY; // Prázdné políčko
-        case 2: return ST77XX_CYAN;
-        case 4: return ST77XX_BLUE;
-        case 8: return ST77XX_GREEN;
-        case 16: return ST77XX_YELLOW;
-        case 32: return ST77XX_ORANGE;
-        case 64: return ST77XX_RED;
-        case 128: return ST77XX_MAGENTA;
-        // Můžeš přidat další barvy pro 256, 512, 1024, 2048
-        default: return ST77XX_WHITE; 
+        case 0:    return ST77XX_DARKGREY; // Prázdné políčko (tmavě šedá)
+        case 2:    return 0x07FF;          // Azurová (Cyan)       - RGB(0, 255, 255)
+        case 4:    return 0x001F;          // Sytá modrá           - RGB(0, 0, 255)
+        case 8:    return 0x07E0;          // Jasná zelená         - RGB(0, 255, 0)
+        case 16:   return 0xFFE0;          // Žlutá                - RGB(255, 255, 0)
+        case 32:   return 0xFD20;          // Oranžová             - RGB(255, 165, 0)
+        case 64:   return 0xF800;          // Červená              - RGB(255, 0, 0)
+        case 128:  return 0xF81F;          // Purpurová / Magenta  - RGB(255, 0, 255)
+        case 256:  return 0xF8B2;          // Sytě růžová (Pink)   - RGB(255, 20, 147)
+        case 512:  return 0x07EF;          // Jarní mořská zelená  - RGB(0, 255, 128)
+        case 1024: return 0x7FE0;          // Limetková / Sv.zelená- RGB(128, 255, 0)
+        case 2048: return 0xFEA0;          // Zlatá (Gold)         - RGB(255, 215, 0)
+        default:   return ST77XX_WHITE;    // Nad 2048 bílá
+    }
+}
+
+// ==================================================================
+// AI AUTOPILOT - POMOCNÉ FUNKCE
+// ==================================================================
+
+// 1. SIMULACE TAHU NANEČISTO
+// dir: 0 = NAHORU, 1 = DOLŮ, 2 = DOLEVA, 3 = DOPRAVA
+bool Game2048::simulateMove(const int src[4][4], int dest[4][4], int dir) {
+    // TODO: 
+    // 1. Zkopírovat src do dest
+    for(int x = 0; x < 4; x++) {
+        for(int y = 0; y < 4; y++) {
+            dest[x][y] = src[x][y];
+        }
+    }
+    
+    switch(dir){
+        case 0:{
+
+            for (int x = 0; x < 4; x++) {
+        
+                // Fáze 1: Gravitace
+                int volno_y = 0;
+                for (int y = 0; y <= 3; y++) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (y != volno_y) { // Pokud už není úplně dole
+                            dest[x][volno_y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_y++;
+                    }
+                }   
+                
+                // Fáze 2: Sčítání
+                for (int y = 0; y < 3; y++) { // Zde je y > 0 správně, abychom nekontrolovali dest[x][-1]
+                    if (dest[x][y] != 0 && dest[x][y] == dest[x][y+1]) {
+                        dest[x][y] = dest[x][y] * 2;
+                        dest[x][y+1] = 0;
+                    }
+                }
+                
+                // Fáze 3: Gravitace po sčítání
+                volno_y = 0;
+                for (int y = 0; y <= 3; y++) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (y != volno_y) { // Pokud už není úplně dole
+                            dest[x][volno_y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_y++;
+                    }
+                }
+            }
+        
+            // NAHORU
+            break;
+        }
+        case 1:{
+
+            for (int x = 0; x < 4; x++) {
+        
+                // Fáze 1: Gravitace
+                int volno_y = 3;
+                for (int y = 3; y >= 0; y--) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (y != volno_y) { // Pokud už není úplně dole
+                            dest[x][volno_y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_y--;
+                    }
+                }   
+                
+                // Fáze 2: Sčítání
+                for (int y = 3; y > 0; y--) { // Zde je y > 0 správně, abychom nekontrolovali dest[x][-1]
+                    if (dest[x][y] != 0 && dest[x][y] == dest[x][y-1]) {
+                        dest[x][y] = dest[x][y] * 2;
+                        dest[x][y-1] = 0;
+                    }
+                }
+                
+                // Fáze 3: Gravitace po sčítání
+                volno_y = 3;
+                for (int y = 3; y >= 0; y--) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (y != volno_y) {
+                            dest[x][volno_y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_y--;
+                    }
+                } 
+            }
+            // DOLŮ
+            break;
+        }
+        case 2:{
+
+            for (int y = 0; y < 4; y++) {
+                // Fáze 1: Gravitace doleva
+                int volno_x = 0;
+                for (int x = 0; x <= 3; x++) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (x != volno_x) {
+                            dest[volno_x][y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_x++;
+                    }
+                }   
+                
+                // Fáze 2: Sčítání
+                for (int x = 0; x < 3; x++) {
+                    if (dest[x][y] != 0 && dest[x][y] == dest[x+1][y]) {
+                        dest[x][y] = dest[x][y] * 2;
+                        dest[x+1][y] = 0;
+                    }
+                }
+                
+                // Fáze 3: Gravitace doleva po sčítání
+                volno_x = 0;
+                for (int x = 0; x <= 3; x++) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (x != volno_x) {
+                            dest[volno_x][y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_x++;
+                    }
+                }
+            }
+            // DOLEVA
+            break;
+        }
+        case 3: { // DOPRAVA
+            for (int y = 0; y < 4; y++) {
+                // Fáze 1: Gravitace doprava
+                int volno_x = 3;
+                for (int x = 3; x >= 0; x--) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (x != volno_x) {
+                            dest[volno_x][y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_x--;
+                    }
+                }   
+                
+                // Fáze 2: Sčítání doprava
+                for (int x = 3; x > 0; x--) {
+                    if (dest[x][y] != 0 && dest[x][y] == dest[x-1][y]) {
+                        dest[x][y] = dest[x][y] * 2;
+                        dest[x-1][y] = 0;
+                    }
+                }
+                
+                // Fáze 3: Gravitace doprava po sčítání
+                volno_x = 3;
+                for (int x = 3; x >= 0; x--) {
+                    if (dest[x][y] != 0) {
+                        int ulozeneCislo = dest[x][y];
+                        if (x != volno_x) {
+                            dest[volno_x][y] = ulozeneCislo;
+                            dest[x][y] = 0;
+                        }
+                        volno_x--;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
+    // 3. Porovnat dest se src:
+    //    - Pokud se aspoň jedno políčko liší, vrátit true (tah je platný)
+    //    - Pokud je pole úplně stejné, vrátit false (tímto směrem se nedá hnout)
+
+    for (int x = 0; x < 4; x++) {
+        for (int y = 0; y < 4; y++) {
+            if (dest[x][y] != src[x][y]) return true; // Změnilo se
+        }
+    }
+    return false; // Deska zůstala stejná
+}
+
+// 2. VYHODNOCENÍ DESKY (HEURISTIKA)
+int Game2048::evaluateBoard(const int b[4][4]) {
+    int totalScore = 0;
+
+    // -------------------------------------------------------------
+    // PILÍŘ 1: VÁHOVÁ MATICE (Jemnější had 1..16 končící na [3][3])
+    // -------------------------------------------------------------
+    // Používáme škálu 1..16, aby matice nepřeválcovala ostatní pilíře
+    const int weights[4][4] = {
+        {  4,  3,  2,  1 },   // y = 0: <- zprava doleva
+        {  5,  6,  7,  8 },   // y = 1: -> zleva doprava
+        { 12, 11, 10,  9 },   // y = 2: <- zprava doleva
+        { 13, 14, 15, 16 }    // y = 3: -> zleva doprava (největší váha 16 na [3][3] vpravo dole)
+    };
+
+    for (int y = 0; y <= 3; y++) {
+        for (int x = 0; x <= 3; x++) {
+            totalScore += b[x][y] * weights[y][x];
+        }
+    }
+
+    // -------------------------------------------------------------
+    // PILÍŘ 2: POČET VOLNÝCH POLÍČEK
+    // -------------------------------------------------------------
+    for (int y = 0; y <= 3; y++) {
+        for (int x = 0; x <= 3; x++) {
+            if (b[x][y] == 0) {
+                totalScore += 500;
+            }
+        }
+    }
+
+    // -------------------------------------------------------------
+    // PILÍŘ 3: MAXIMUM V ROHU [3][3]
+    // -------------------------------------------------------------
+    int max_val = 0;
+    for (int y = 0; y <= 3; y++) {
+        for (int x = 0; x <= 3; x++) {
+            if (b[x][y] > max_val) {
+                max_val = b[x][y];
+            }
+        }
+    }
+
+    if (max_val == b[3][3]) {
+        totalScore += 10000;
+    }
+
+    // -------------------------------------------------------------
+    // PILÍŘ 4: SLUČITELNOST SOUSEDŮ (MERGE BONUS)
+    // -------------------------------------------------------------
+    // Horizontální sousedé (x a x+1)
+    for (int y = 0; y <= 3; y++) {
+        for (int x = 0; x <= 2; x++) {
+            if (b[x][y] != 0 && b[x][y] == b[x + 1][y]) {
+                totalScore += b[x][y] * 2;
+            }
+        }
+    }
+
+    // Vertikální sousedé (y a y+1)
+    for (int x = 0; x <= 3; x++) {
+        for (int y = 0; y <= 2; y++) {
+            if (b[x][y] != 0 && b[x][y] == b[x][y + 1]) {
+                totalScore += b[x][y] * 2;
+            }
+        }
+    }
+
+    return totalScore;
+}
+
+
+// 3. VÝBĚR A PROVEDENÍ NEJLEPŠÍHO TAHU
+void Game2048::autoStep() {
+    if (currentState == G2048_GAME_OVER) {
+        return;
+    }
+
+    int bestDir = -1;
+    int bestScore = -1000000;
+
+    // Otestujeme všechny 4 směry (0 = UP, 1 = DOWN, 2 = LEFT, 3 = RIGHT)
+    for (int dir = 0; dir < 4; dir++) {
+        int simulatedBoard[4][4];
+
+        // 1. Lze se tímto směrem pohnout?
+        if (!simulateMove(board, simulatedBoard, dir)) {
+            continue; // Neplatný tah, přeskočit
+        }
+
+        // 2. Ohodnotit výsledný stav
+        int score = evaluateBoard(simulatedBoard);
+
+        // 3. Uchovat nejlepší směr
+        if (score > bestScore) {
+            bestScore = score;
+            bestDir = dir;
+        }
+    }
+
+    // 4. Provedení reálného tahu
+    if (bestDir != -1) {
+        switch (bestDir) {
+            case 0: moveUp();    break;
+            case 1: moveDown();  break;
+            case 2: moveLeft();  break;
+            case 3: moveRight(); break;
+        }
+    } else {
+        // Žádný směr nevedl k platnému tahu
+        currentState = G2048_GAME_OVER;
     }
 }
 
@@ -316,10 +674,12 @@ void Game2048::draw() {
     }
 
     if (currentState == G2048_GAME_OVER) {
-        canvas->setTextColor(ST77XX_RED);
-        canvas->setTextSize(4);
-        canvas->setCursor(45, 100);
-        canvas->print("KONEC!");
+        canvas->fillRect(55, 95, 210, 50, ST77XX_RED);
+        canvas->drawRect(55, 95, 210, 50, ST77XX_WHITE);
+        canvas->setTextColor(ST77XX_WHITE);
+        canvas->setTextSize(3);
+        canvas->setCursor(79, 108);
+        canvas->print("GAME OVER");
     }
 
     gfx.pushCanvasToScreen();

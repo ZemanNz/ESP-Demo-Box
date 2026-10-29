@@ -226,13 +226,14 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <button class="mode-btn" onclick="setAppMode(2)">🐍 Snake</button>
                     <button class="mode-btn" onclick="setAppMode(3)">🐦 Flappy</button>
                     <button class="mode-btn" onclick="setAppMode(4)">🔢 2048</button>
-                    <button class="mode-btn" onclick="setAppMode(5)">📐 Vzdálenost</button>
-                    <button class="mode-btn" onclick="setAppMode(6)">📶 Wi-Fi QR</button>
-                    <button class="mode-btn" onclick="setAppMode(7)">📡 CSI Radar</button>
-                    <button class="mode-btn" onclick="setAppMode(8)">🦾 Serva</button>
-                    <button class="mode-btn" onclick="setAppMode(9)">⚙️ Motor</button>
-                    <button class="mode-btn" onclick="setAppMode(10)">🌈 Barvy</button>
-                    <button class="mode-btn btn-sleep" onclick="setAppMode(11)">💤 Spánek</button>
+                    <button class="mode-btn" onclick="setAppMode(5)">🧱 Tetris</button>
+                    <button class="mode-btn" onclick="setAppMode(6)">📐 Vzdálenost</button>
+                    <button class="mode-btn" onclick="setAppMode(7)">📶 Wi-Fi QR</button>
+                    <button class="mode-btn" onclick="setAppMode(8)">📡 CSI Radar</button>
+                    <button class="mode-btn" onclick="setAppMode(9)">🦾 Serva</button>
+                    <button class="mode-btn" onclick="setAppMode(10)">⚙️ Motor</button>
+                    <button class="mode-btn" onclick="setAppMode(11)">🌈 Barvy</button>
+                    <button class="mode-btn btn-sleep" onclick="setAppMode(12)">💤 Spánek</button>
                 </div>
             </div>
 
@@ -998,7 +999,7 @@ let currentAppMode = 0;     // Číslo aktuálního aktivního režimu na ESP32
 
 // Názvy jednotlivých módů pro hezké vypsání v záložce Systém
 const modeNames = [
-    "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048",
+    "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048", "Hra Tetris",
     "Měření vzdálenosti", "Wi-Fi QR spojení", "Wi-Fi CSI Radar", "Ovládání serv", "Ovládání motoru",
     "Barevný senzor", "Spánkový režim"
 ];

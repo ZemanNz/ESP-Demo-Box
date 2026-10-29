@@ -18,9 +18,11 @@ public:
     void update();
     void draw();
     void reset();
+    void autoStep(); // AI Autopilot
 
     bool getGameOver() const { return isGameOver; }
     int getScore() const { return score; }
+    void setBestScore(int b) { bestScore = b; }
 
 private:
     void spawn_next_Obstacle();
@@ -31,6 +33,7 @@ private:
     float lift;
     bool isGameOver;
     int score;
+    int bestScore;
 
     std::vector<Prekazka> prekazky;
 };

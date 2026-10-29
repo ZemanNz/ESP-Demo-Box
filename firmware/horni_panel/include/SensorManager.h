@@ -57,6 +57,7 @@ public:
 
     // Sedmisegmentový displej přes 74HC595 (Zobrazí číslo a uloží do SensorData)
     void set7Segment(int value);
+    void set7SegmentText(const char* text);
 
     // I2C LCD 1602 displej
     void writeLCD1602(const char* line1, const char* line2 = nullptr);

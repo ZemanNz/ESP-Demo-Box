@@ -86,9 +86,11 @@ void SnakeGame::draw() {
     }
 
     if (game_stopped) {
-        canvas->setTextColor(ST77XX_RED);
+        canvas->fillRect(55, 95, 210, 50, ST77XX_RED);
+        canvas->drawRect(55, 95, 210, 50, ST77XX_WHITE);
+        canvas->setTextColor(ST77XX_WHITE);
         canvas->setTextSize(3);
-        canvas->setCursor(45, 110);
+        canvas->setCursor(79, 108);
         canvas->print("GAME OVER");
     }
 
