@@ -32,6 +32,62 @@
   extern Servo servoCont;
 #endif
 
+// =============================================================================
+// Stavový automat pro rotační enkodér (přesně z větve encoder_upgrade)
+// =============================================================================
+#ifdef ENABLE_ENCODER
+#define ENC_DIR_NONE 0x00
+#define ENC_DIR_CW   0x10
+#define ENC_DIR_CCW  0x20
+
+static const uint8_t PROGMEM enc_state_table[7][4] = {
+    // 00: START
+    {0x0, 0x2, 0x4, 0x0},
+    // 01: CW_FINAL
+    {0x3, 0x0, 0x1, 0x10},
+    // 02: CW_BEGIN
+    {0x3, 0x2, 0x0, 0x0},
+    // 03: CW_NEXT
+    {0x3, 0x2, 0x1, 0x0},
+    // 04: CCW_BEGIN
+    {0x6, 0x0, 0x4, 0x0},
+    // 05: CCW_FINAL
+    {0x6, 0x5, 0x0, 0x20},
+    // 06: CCW_NEXT
+    {0x6, 0x5, 0x4, 0x0},
+};
+
+static volatile int32_t isrEncoderPos = 0;
+static volatile uint8_t isrEncoderState = 0;
+static volatile unsigned long lastIsrStepTime = 0;
+
+static void IRAM_ATTR encoderISR() {
+    uint8_t pinState = (digitalRead(PIN_ENC_CLK) << 1) | digitalRead(PIN_ENC_DT);
+    isrEncoderState = pgm_read_byte(&enc_state_table[isrEncoderState & 0x0F][pinState]);
+    uint8_t result = isrEncoderState & 0x30;
+
+    if (result == ENC_DIR_CW || result == ENC_DIR_CCW) {
+        unsigned long nowUs = micros();
+        // Ochranné okno 60 ms (60 000 us) přímo v přerušení:
+        // Spolehlivě eliminuje dozvuky mechanické pružinky zubu (cca 35-50 ms),
+        // ale zachovává bleskovou odezvu na lidské otáčení.
+        if (nowUs - lastIsrStepTime >= 60000) {
+            lastIsrStepTime = nowUs;
+            if (result == ENC_DIR_CW) {
+                isrEncoderPos = (isrEncoderPos + 1) % 12;
+            } else {
+                isrEncoderPos = (isrEncoderPos - 1 + 12) % 12;
+            }
+        }
+    }
+}
+
+void setupEncoderInterrupts() {
+    attachInterrupt(digitalPinToInterrupt(PIN_ENC_CLK), encoderISR, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(PIN_ENC_DT), encoderISR, CHANGE);
+}
+#endif
+
 SensorManager sensorManager;
 
 SensorManager::SensorManager() {
@@ -90,19 +146,14 @@ void SensorManager::readLimitSwitches() {
 
 void SensorManager::readEncoder() {
 #ifdef ENABLE_ENCODER
-    int clkState = digitalRead(PIN_ENC_CLK);
-    if (clkState != lastClkState && clkState == LOW) {
-        if (digitalRead(PIN_ENC_DT) != clkState) {
-            encoderPos++;
-        } else {
-            encoderPos--;
-        }
-    }
-    lastClkState = clkState;
+    // Bezpečné vyčtení z přerušení (atomická operace)
+    noInterrupts();
+    encoderPos = isrEncoderPos;
+    interrupts();
 
     bool btn = false;
 #ifdef ENABLE_JOYSTICK
-    // Joystick tlačítko nebo enkodér tlačítko
+    // Tlačítko joysticku / enkodéru, pokud je zapojeno
 #endif
     int16_t delta = (int16_t)(encoderPos - lastReportedEncoderPos);
     lastReportedEncoderPos = encoderPos;

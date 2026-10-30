@@ -168,6 +168,9 @@ bool setupInputs() {
 #ifdef ENABLE_ENCODER
     pinMode(PIN_ENC_CLK, INPUT_PULLUP);
     pinMode(PIN_ENC_DT, INPUT_PULLUP);
+    // Připojení přerušení pro stavový automat (CHANGE na obou pinech)
+    extern void setupEncoderInterrupts();
+    setupEncoderInterrupts();
 #endif
 
     // 5x Tlačítka

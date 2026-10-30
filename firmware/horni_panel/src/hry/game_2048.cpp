@@ -632,13 +632,6 @@ void Game2048::draw() {
 
     canvas->fillScreen(ST77XX_BLACK);
 
-    // Vykreslení skóre do horního okraje
-    canvas->setTextColor(ST77XX_WHITE);
-    canvas->setTextSize(2);
-    canvas->setCursor(10, 2);
-    canvas->print("Skore: ");
-    canvas->print(score);
-
     // Výpočet pozic pro vykreslení krásně doprostřed displeje
     int tileSize = 50;
     int spacing = 6;
@@ -672,6 +665,13 @@ void Game2048::draw() {
             }
         }
     }
+
+    // Vykreslení skóre do horního okraje (navrchu)
+    canvas->setTextColor(ST77XX_WHITE);
+    canvas->setTextSize(2);
+    canvas->setCursor(10, 2);
+    canvas->print("Skore: ");
+    canvas->print(score);
 
     if (currentState == G2048_GAME_OVER) {
         canvas->fillRect(55, 95, 210, 50, ST77XX_RED);

@@ -704,6 +704,24 @@ void Task_Display_UI(void *pvParameters) {
     static bool lastBtnDown[5] = {false, false, false, false, false};
     static bool lastBtnTop = false;
     static int32_t lastEncoderPos = 0;
+    static bool encoderInitialized = false;
+
+    // Seznam všech 12 přepínatelných módů (mimo MODE_SLEEP)
+    static const AppMode kSelectableModes[] = {
+        MODE_MAIN_MENU,
+        MODE_GYRO,
+        MODE_GAME_SNAKE,
+        MODE_GAME_FLAPPY,
+        MODE_2048,
+        MODE_GAME_TETRIS,
+        MODE_VZDALENOST,
+        MODE_WIFI_SPOJENI,
+        MODE_WIFI_DETECTION,
+        MODE_SERVA,
+        MODE_MOTOR,
+        MODE_BAREVNY
+    };
+    static const int kNumSelectableModes = sizeof(kSelectableModes) / sizeof(kSelectableModes[0]);
 
     for (;;) {
         // 1. Zjistíme, v jakém stavu se kufr zrovna nachází
@@ -713,6 +731,56 @@ void Task_Display_UI(void *pvParameters) {
         // OBSLUHA FYZICKÝCH / VIRTUÁLNÍCH TLAČÍTEK A ENKODÉRU PRO PŘEPÍNÁNÍ MÓDŮ
         // ---------------------------------------------------------
         SensorData currentSensors = globalState.getSensorData();
+
+        // Inicializace enkodéru po startu / prvním paketu z UARTu
+        if (!encoderInitialized) {
+            lastEncoderPos = currentSensors.encoderPos;
+            encoderInitialized = true;
+        }
+
+        // PŘEPÍNÁNÍ MÓDŮ ROTAČNÍM ENKODÉREM (rádio stanice s hysterezí a ochranou proti šumu)
+        static int32_t accumulatedDelta = 0;
+        static int lastStepDirection = 0;
+        static unsigned long lastDirectionSwitchTime = 0;
+        unsigned long nowEncoderTime = millis();
+
+        if (currentMode != MODE_SLEEP && currentSensors.encoderPos != lastEncoderPos) {
+            int32_t diff = currentSensors.encoderPos - lastEncoderPos;
+            lastEncoderPos = currentSensors.encoderPos;
+            accumulatedDelta += diff;
+
+            // Vyžadujeme akumulaci 2 pulzů pro přepnutí stanice (stabilní krok bez náhodného šumu)
+            if (abs(accumulatedDelta) >= 2) {
+                int direction = (accumulatedDelta > 0) ? 1 : -1;
+                accumulatedDelta = 0; // Vyresetujeme střadač
+
+                // Ochrana proti okamžitému kmitání tam a zpět (antireverzní filtr 250 ms)
+                // Zabraňuje samovolnému probliknutí a resetu hry
+                if (direction == -lastStepDirection && (nowEncoderTime - lastDirectionSwitchTime < 250)) {
+                    // Ignorujeme okamžitý falešný odraz zpět
+                } else {
+                    lastStepDirection = direction;
+                    lastDirectionSwitchTime = nowEncoderTime;
+
+                    // Najdeme aktuální index módu
+                    int currentIndex = 0;
+                    for (int i = 0; i < kNumSelectableModes; i++) {
+                        if (kSelectableModes[i] == currentMode) {
+                            currentIndex = i;
+                            break;
+                        }
+                    }
+
+                    // Posuneme se přesně o 1 mód (doprava nebo doleva)
+                    int newIndex = (currentIndex + direction + kNumSelectableModes) % kNumSelectableModes;
+                    AppMode targetMode = kSelectableModes[newIndex];
+
+                    Serial.printf("[ENCODER RADIO] Krok: %+d | Prepinam: %d -> %d\n", direction, (int)currentMode, (int)targetMode);
+                    globalState.setMode(targetMode);
+                    currentMode = targetMode;
+                }
+            }
+        }
 
         // Horní fyzické tlačítko: Návrat do Menu nebo info
         if (currentSensors.btnTop && !lastBtnTop) {
@@ -1406,6 +1474,8 @@ void Task_Display_UI(void *pvParameters) {
                 static bool g2048_lastJoyBtn = false;
                 static unsigned long lastG2048Action = 0;
                 static unsigned long lastAuto2048 = 0;
+                static unsigned long g2048_joyBtnHoldTime = 0;
+                static bool g2048_resetTriggered = false;
                 unsigned long now2048 = millis();
 
                 if (needsFullRedraw) {
@@ -1416,6 +1486,23 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 bool userAction = false;
+
+                // Podržením joysticku (>= 400 ms) se kdykoliv resetuje hra 2048
+                if (data.joyBtn) {
+                    if (g2048_joyBtnHoldTime == 0) {
+                        g2048_joyBtnHoldTime = now2048;
+                        g2048_resetTriggered = false;
+                    } else if (!g2048_resetTriggered && (now2048 - g2048_joyBtnHoldTime >= 400)) {
+                        g2048.reset();
+                        g2048.pohyb = true;
+                        g2048_resetTriggered = true;
+                        lastG2048Action = now2048;
+                    }
+                } else {
+                    g2048_joyBtnHoldTime = 0;
+                    g2048_resetTriggered = false;
+                }
+
                 // Reset rekordu 2048 při současném stisku CENTER a JOYSTICKU:
                 if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
                     resetHighScore("2048", bestScore2048);
@@ -1486,6 +1573,8 @@ void Task_Display_UI(void *pvParameters) {
                 static unsigned long lastDownTime = 0;
                 static bool wasDownHeld = false;
                 static bool lastUpState = false;
+                static unsigned long tetris_joyBtnHoldTime = 0;
+                static bool tetris_resetTriggered = false;
                 unsigned long aktualniCas = millis();
 
                 if (needsFullRedraw) {
@@ -1497,6 +1586,22 @@ void Task_Display_UI(void *pvParameters) {
                     wasDownHeld = false;
                     lastUpState = false;
                     tetris.draw();
+                }
+
+                // Podržením joysticku (>= 400 ms) se kdykoliv resetuje hra Tetris
+                if (data.joyBtn) {
+                    if (tetris_joyBtnHoldTime == 0) {
+                        tetris_joyBtnHoldTime = aktualniCas;
+                        tetris_resetTriggered = false;
+                    } else if (!tetris_resetTriggered && (aktualniCas - tetris_joyBtnHoldTime >= 400)) {
+                        tetris.reset();
+                        casPoslednihoKroku = aktualniCas;
+                        tetris_resetTriggered = true;
+                        tetris.draw();
+                    }
+                } else {
+                    tetris_joyBtnHoldTime = 0;
+                    tetris_resetTriggered = false;
                 }
 
                 // Reset rekordu při současném stisku tlačítka CENTER a JOYSTICKU
@@ -2056,8 +2161,26 @@ void Task_Display_UI(void *pvParameters) {
                 bool boost = false;
                 SensorData data = globalState.getSensorData();
                 static bool snake_lastBtn[5] = {false, false, false, false, false};
+                static bool snake_lastJoyBtn = false;
                 static unsigned long lastSnakeAction = 0;
                 static unsigned long inputHoldStartTime = 0;
+                static unsigned long snake_joyBtnHoldTime = 0;
+                static bool snake_resetTriggered = false;
+
+                // Podržením joysticku (>= 400 ms) se kdykoliv resetuje hra
+                if (data.joyBtn) {
+                    if (snake_joyBtnHoldTime == 0) {
+                        snake_joyBtnHoldTime = aktualniCas;
+                        snake_resetTriggered = false;
+                    } else if (!snake_resetTriggered && (aktualniCas - snake_joyBtnHoldTime >= 400)) {
+                        snake.reset();
+                        snake_resetTriggered = true;
+                        lastSnakeAction = aktualniCas;
+                    }
+                } else {
+                    snake_joyBtnHoldTime = 0;
+                    snake_resetTriggered = false;
+                }
 
                 if (!data.switch1) {
 
@@ -2098,12 +2221,13 @@ void Task_Display_UI(void *pvParameters) {
                 // Reset rekordu při současném stisku CENTER a JOYSTICKU:
                 if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
                     resetHighScore("snake", bestScoreSnake);
-                } else if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || data.joyBtn) {
+                } else if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || (data.joyBtn && !snake_lastJoyBtn)) {
                     lastSnakeAction = aktualniCas;
                     if (snake.isGameOver()) {
                         snake.reset();
                     }
                 }
+                snake_lastJoyBtn = data.joyBtn;
                 for (int i = 0; i < 5; i++) snake_lastBtn[i] = data.btnDown[i];
 
 
@@ -2133,6 +2257,25 @@ void Task_Display_UI(void *pvParameters) {
                 SensorData data = globalState.getSensorData();
                 static bool flappy_lastBtn = false;
                 static unsigned long lastFlappyAction = 0;
+                static unsigned long flappy_joyBtnHoldTime = 0;
+                static bool flappy_resetTriggered = false;
+
+                // Podržením joysticku (>= 400 ms) se kdykoliv resetuje hra Flappy Bird
+                if (data.joyBtn) {
+                    if (flappy_joyBtnHoldTime == 0) {
+                        flappy_joyBtnHoldTime = aktualniCasFlappy;
+                        flappy_resetTriggered = false;
+                    } else if (!flappy_resetTriggered && (aktualniCasFlappy - flappy_joyBtnHoldTime >= 400)) {
+                        flappy.reset();
+                        flappy.setBestScore(bestScoreFlappy);
+                        flappy_resetTriggered = true;
+                        lastFlappyAction = aktualniCasFlappy;
+                        flappy.draw();
+                    }
+                } else {
+                    flappy_joyBtnHoldTime = 0;
+                    flappy_resetTriggered = false;
+                }
 
                 // Skok nebo restart hry při stisku kteréhokoliv tlačítka D-Padu, joysticku nebo horního tlačítka
                 if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {

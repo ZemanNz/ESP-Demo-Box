@@ -70,13 +70,6 @@ void SnakeGame::draw() {
     // Vyčistíme paměť na černo
     canvas->fillScreen(ST77XX_BLACK);
 
-    // Kreslení skóre
-    canvas->setTextColor(ST77XX_WHITE);
-    canvas->setTextSize(2);
-    canvas->setCursor(5, 5);
-    canvas->print("Skore: ");
-    canvas->print(score);
-
     // Kreslení jídla (Červená)
     canvas->fillRect(OFFSET_X + jidlo.x * BLOCK_SIZE, OFFSET_Y + jidlo.y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE, ST77XX_RED);
 
@@ -84,6 +77,13 @@ void SnakeGame::draw() {
     for (const auto& p : snake) {
         canvas->fillRect(OFFSET_X + p.x * BLOCK_SIZE, OFFSET_Y + p.y * BLOCK_SIZE, BLOCK_SIZE - 1, BLOCK_SIZE - 1, ST77XX_GREEN);
     }
+
+    // Kreslení skóre AŽ NAKONEC přes hada a jídlo, aby skóre nebylo nikdy překryté
+    canvas->setTextColor(ST77XX_WHITE);
+    canvas->setTextSize(2);
+    canvas->setCursor(5, 5);
+    canvas->print("Skore: ");
+    canvas->print(score);
 
     if (game_stopped) {
         canvas->fillRect(55, 95, 210, 50, ST77XX_RED);
