@@ -235,8 +235,10 @@ bool setupSensors() {
 
 #ifdef ENABLE_BUZZER
     pinMode(PIN_BUZZER, OUTPUT);
-    // Krátké pípnutí pro signalizaci startu
-    tone(PIN_BUZZER, 2000, 100);
+    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL); // Klidový stav = TICHO
+#else
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
 #endif
 
 #ifdef ENABLE_LEDS

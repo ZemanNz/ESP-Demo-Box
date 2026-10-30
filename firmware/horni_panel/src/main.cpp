@@ -782,8 +782,11 @@ void Task_Display_UI(void *pvParameters) {
             }
         }
 
-        // Horní fyzické tlačítko: Návrat do Menu nebo info
+        // Horní fyzické tlačítko: Návrat do Menu nebo info + pípnutí pro otestování bzučáku
         if (currentSensors.btnTop && !lastBtnTop) {
+            #ifdef ENABLE_BUZZER
+            sensorManager.beep(2400, 60); // Krátké potvrzovací pípnutí při stisku tlačítka
+            #endif
             if (currentMode != MODE_MAIN_MENU) {
                 globalState.setMode(MODE_MAIN_MENU);
                 currentMode = MODE_MAIN_MENU;

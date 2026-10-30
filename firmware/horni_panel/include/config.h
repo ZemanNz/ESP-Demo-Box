@@ -17,7 +17,7 @@
 #define ENABLE_IR_SENSORS     // IR digitální senzory (IR1, IR2)
 #define ENABLE_PHOTORESISTORS // Analogové fotorezistory (2x)
 #define ENABLE_BUTTONS        // Uživatelské tlačítko INFO
-//#define ENABLE_BUZZER       // Pasivní piezo bzučák - VYPNUTO
+#define ENABLE_BUZZER         // Pasivní/aktivní bzučák (GPIO 7)
 #define ENABLE_LEDS           // Indikační LED diody (3x)
 #define ENABLE_WS2812B        // Adresovatelný LED pásek WS2812B (FastLED / NeoPixel)
 #define ENABLE_MAX7219        // 3-místný sedmisegmentový displej (MAX7219)
@@ -177,7 +177,9 @@
 //  VÝSTUPY (Bzučák, LED diody a pásek)
 // =============================================================================
 // V kódu v setup(): pinMode(PIN_..., OUTPUT);
-#define PIN_BUZZER            7   // Pasivní piezo bzučák (tone())
+#define PIN_BUZZER            7   // Bzučák (aktivní LOW / ticho na HIGH)
+#define BUZZER_SILENT_LEVEL  HIGH // Úroveň pro TICHO (HIGH = ticho při PNP/invertovaném spínání)
+#define BUZZER_ACTIVE_LEVEL  LOW  // Úroveň pro TÓN/PÍPNUTÍ (LOW = sepnuto)
 #define PIN_LED_IR           39   // LED D1 (nad IR senzorem)
 #define PIN_LED_ULT          40   // LED D4 (nad Ultrazvukem)
 #define PIN_LED_LASER        41   // LED D5 (nad Laserem)

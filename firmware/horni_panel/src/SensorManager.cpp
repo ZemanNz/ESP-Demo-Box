@@ -439,13 +439,13 @@ void SensorManager::setBuiltinRgb(uint8_t r, uint8_t g, uint8_t b) {
 #endif
 }
 
-// Pasivní bzučák
+// Bzučák
 void SensorManager::setBuzzer(bool active, uint16_t freq) {
 #ifdef ENABLE_BUZZER
-    if (active && freq > 0) {
-        tone(PIN_BUZZER, freq);
+    if (active) {
+        digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
     } else {
-        noTone(PIN_BUZZER);
+        digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
     }
 #endif
     globalState.updateBuzzer(active, freq); // Uloží stav do SensorData
@@ -453,9 +453,11 @@ void SensorManager::setBuzzer(bool active, uint16_t freq) {
 
 void SensorManager::beep(uint16_t freq, uint32_t durationMs) {
 #ifdef ENABLE_BUZZER
-    tone(PIN_BUZZER, freq, durationMs);
+    digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
+    delay(durationMs);
+    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
 #endif
-    globalState.updateBuzzer(true, freq);
+    globalState.updateBuzzer(false, 0);
 }
 
 // Sedmisegmentový displej přes posuvný registr 74HC595
