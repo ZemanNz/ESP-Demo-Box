@@ -42,6 +42,7 @@ public:
     void setLed1(bool on);
     void setLed2(bool on);
     void setLed3(bool on);
+    void setColorSensorLed(bool on);
 
     // 8-LED RGB pásek WS2812B (Fyzicky zobrazí a uloží barvy do SensorData)
     void setLedStrip(const uint32_t leds[8], uint8_t brightness = 60);

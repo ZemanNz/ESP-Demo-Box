@@ -403,6 +403,12 @@ void SensorManager::setLed3(bool on) {
     setLeds(current.led_ult, current.led_ir, on);
 }
 
+void SensorManager::setColorSensorLed(bool on) {
+#if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
+    digitalWrite(PIN_TCS_LED, on ? HIGH : LOW);
+#endif
+}
+
 // 8-LED WS2812B RGB pásek
 void SensorManager::setLedStrip(const uint32_t leds[8], uint8_t brightness) {
 #ifdef ENABLE_WS2812B

@@ -189,6 +189,8 @@
 #define PIN_LED_1            PIN_LED1
 #define PIN_LED_2            PIN_LED2
 #define PIN_LED_3            PIN_LED3
+#define PIN_TCS_LED          19   // LED osvětlení barevného senzoru TCS34725
+#define PIN_COLOR_LED        PIN_TCS_LED
 #define PIN_WS2812B          42   // Datový pin pro adresovatelný LED pásek WS2812B
 #define PIN_LED_STRIP        PIN_WS2812B
 #define WS2812B_NUM_LEDS      8   // Počet LED diod na horním pásku

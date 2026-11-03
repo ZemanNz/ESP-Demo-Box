@@ -842,7 +842,12 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setLCDBacklight(false);
                 #endif
 
-                // 7. Vyčkáme na uvolnění horního tlačítka!
+                // 7. Zhasneme LED osvětlení barevného senzoru TCS34725
+                #if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
+                    sensorManager.setColorSensorLed(false);
+                #endif
+
+                // 8. Vyčkáme na uvolnění horního tlačítka!
                 // (Uživatel ho před chvílí 1s držel pro uspání, takže pin 47 je v této chvíli stále LOW.
                 // Kdybychom hned povolili wake-up na LOW úroveň, procesor by se v tu stejnou mikrosekundu okamžitě probudil!)
                 Serial.println("[SYSTEM] Cekam na uvolneni tlacitka TOP...");
@@ -1019,6 +1024,11 @@ void Task_Display_UI(void *pvParameters) {
 
                 #ifdef ENABLE_LCD1602
                     sensorManager.setLCDBacklight(true);
+                #endif
+
+                // Znovu rozsvítíme LED osvětlení barevného senzoru TCS34725
+                #if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
+                    sensorManager.setColorSensorLed(true);
                 #endif
 
                 Serial.printf("\n[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);

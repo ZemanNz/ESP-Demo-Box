@@ -252,6 +252,11 @@ bool setupSensors() {
     digitalWrite(PIN_LED3, HIGH); delay(100); digitalWrite(PIN_LED3, LOW);
 #endif
 
+#if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
+    pinMode(PIN_TCS_LED, OUTPUT);
+    digitalWrite(PIN_TCS_LED, HIGH); // Rozsvítit LED pro osvětlení barevného senzoru TCS34725
+#endif
+
 #ifdef ENABLE_WS2812B
     strip.begin();
     strip.setBrightness(60);
