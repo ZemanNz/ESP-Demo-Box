@@ -61,7 +61,7 @@ public:
     // -------------------------------------------------------------
     void drawThickLine(int x0, int y0, int x1, int y1, int thickness, uint16_t color);
     void drawArrow(int x0, int y0, int x1, int y1, int headSize, uint16_t color);
-    void drawColorWheel(int cx, int cy, int radius);
+    void drawColorWheel(int cx, int cy, int radius, bool drawBorder = true);
     void drawQRCode(int startX, int startY, int moduleSize = 6);
 
     // -------------------------------------------------------------

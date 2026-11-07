@@ -253,8 +253,10 @@ bool setupSensors() {
 #endif
 
 #if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
-    pinMode(PIN_TCS_LED, OUTPUT);
-    digitalWrite(PIN_TCS_LED, HIGH); // Rozsvítit LED pro osvětlení barevného senzoru TCS34725
+    // Inicializace hardwarového PWM (LEDC) pro plynulou regulaci jasu LED na TCS34725
+    ledcSetup(LEDC_CHAN_TCS_LED, LEDC_FREQ_TCS_LED, LEDC_RES_TCS_LED);
+    ledcAttachPin(PIN_TCS_LED, LEDC_CHAN_TCS_LED);
+    ledcWrite(LEDC_CHAN_TCS_LED, 60); // Výchozí decentní svit
 #endif
 
 #ifdef ENABLE_WS2812B

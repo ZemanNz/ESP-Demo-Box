@@ -172,7 +172,7 @@ void GraphicsManager::drawArrow(int x0, int y0, int x1, int y1, int headSize, ui
     tft.fillTriangle(a1x, a1y, a2x, a2y, a3x, a3y, color);
 }
 
-void GraphicsManager::drawColorWheel(int cx, int cy, int radius) {
+void GraphicsManager::drawColorWheel(int cx, int cy, int radius, bool drawBorder) {
     // 1. Plný bílý podklad, aby barva pozadí nikde neprosvítala
     tft.fillCircle(cx, cy, radius, ST77XX_WHITE);
 
@@ -207,8 +207,10 @@ void GraphicsManager::drawColorWheel(int cx, int cy, int radius) {
         prevY = curY;
     }
 
-    // 3. Čistý černý obrys
-    tft.drawCircle(cx, cy, radius, ST77XX_BLACK);
+    // 3. Volitelný čistý černý obrys
+    if (drawBorder) {
+        tft.drawCircle(cx, cy, radius, ST77XX_BLACK);
+    }
 }
 
 // 29x29 QR kód pro okamžité Wi-Fi připojení: WIFI:S:ESP-Demo-Box;T:nopass;;

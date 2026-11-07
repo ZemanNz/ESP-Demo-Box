@@ -117,6 +117,70 @@ void Task_UART(void *pvParameters) {
 #endif
 }
 
+// =============================================================================
+// MODUL: KLASICKÉ BĚŽNÉ FUNKCE SPODNÍHO PANELU (CLASSIC THINGS)
+// =============================================================================
+
+// 1. Klasické řízení serv (MG996R potenciometrem, LX-16A switchem 2, kontinuální joystickem X)
+void updateClassicServos(const BottomInputs& in, int& classicServoAngle, int& last_stupit_angle,
+                         int& lastSwitch2, int& smartTargetDeg, int8_t& contSpeed) {
+    // Klasické servo (0 až 172°):
+    classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+    if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
+        last_stupit_angle = classicServoAngle;
+        sensorManager.setServoClassic(classicServoAngle);
+    }
+
+    // Chytré servo LX-16A přepínačem Switch 2:
+    int currentSwitch2 = in.switch2 ? 1 : 0;
+    if (currentSwitch2 != lastSwitch2) {
+        lastSwitch2 = currentSwitch2;
+        smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+        sensorManager.setSmartServo(smartTargetDeg);
+        Serial.printf("[SMART_SERVO] Prepinac SW2: %s -> cil: %d deg\n",
+                      in.switch2 ? "ON (Zmacknuto)" : "OFF (Roztazeno)", smartTargetDeg);
+    }
+
+    // Kontinuální 360° servo joystickem (osa X):
+    if (in.joyX < 1800) {
+        contSpeed = map(constrain((int)in.joyX, 0, 1800), 1800, 0, 0, 100);
+    } else if (in.joyX > 2200) {
+        contSpeed = map(constrain((int)in.joyX, 2200, 4095), 2200, 4095, 0, -100);
+    } else {
+        contSpeed = 0;
+    }
+
+    // Koncové dorazy:
+    if (in.limitMin && contSpeed > 0) contSpeed = 0;
+    if (in.limitMax && contSpeed < 0) contSpeed = 0;
+
+    sensorManager.setServoCont(contSpeed);
+}
+
+// 2. Efekt plynulé duhy na spodním LED pásku
+void updateClassicRainbowStrip(uint8_t& ledHue) {
+    uint32_t colors[8];
+    for (int i = 0; i < 8; i++) {
+        uint8_t hue = (ledHue + (i * 32)) & 255;
+        uint8_t region = hue / 43;
+        uint8_t remainder = (hue - (region * 43)) * 6;
+        uint8_t q = 255 - remainder;
+        uint8_t t = remainder;
+        uint8_t r = 0, g = 0, b = 0;
+        switch (region) {
+            case 0: r = 255; g = t; b = 0; break;
+            case 1: r = q; g = 255; b = 0; break;
+            case 2: r = 0; g = 255; b = t; break;
+            case 3: r = 0; g = q; b = 255; break;
+            case 4: r = t; g = 0; b = 255; break;
+            default: r = 255; g = 0; b = q; break;
+        }
+        colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+    }
+    sensorManager.setLedStrip(colors, 8);
+    ledHue += 5;
+}
+
 // ---------------------------------------------------------
 // 2. Task: Senzory, Vstupy a Výstupy (Core 1)
 // ---------------------------------------------------------
@@ -496,66 +560,12 @@ void Task_Sensors(void *pvParameters) {
             case MODE_SERVA:
             case MODE_MOTOR:
             default: {
-                // -----------------------------------------------------------------
-                // Řízení klasického (hloupého) serva potenciometrem (0 až 180°):
-                // -----------------------------------------------------------------
-                classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
-                if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
-                    last_stupit_angle = classicServoAngle;
-                    sensorManager.setServoClassic(classicServoAngle);
-                }
+                // 1. Klasické řízení serv (potenciometr -> servo, switch 2 -> LX-16A, joystick X -> kontinuální)
+                updateClassicServos(in, classicServoAngle, last_stupit_angle, lastSwitch2, smartTargetDeg, contSpeed);
 
-                // -----------------------------------------------------------------
-                // Řízení chytrého serva LX-16A přepínačem Switch 2 (s LEDkou):
-                // -----------------------------------------------------------------
-                int currentSwitch2 = in.switch2 ? 1 : 0;
-                if (currentSwitch2 != lastSwitch2) {
-                    lastSwitch2 = currentSwitch2;
-                    smartTargetDeg = in.switch2 ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
-                    sensorManager.setSmartServo(smartTargetDeg);
-                    Serial.printf("[SMART_SERVO] Prepinac SW2: %s -> cil: %d deg\n",
-                                in.switch2 ? "ON (Zmacknuto)" : "OFF (Roztazeno)", smartTargetDeg);
-                }
-
-                // -----------------------------------------------------------------
-                // Řízení kontinuálního 360° serva joystickem (osa X):
-                // -----------------------------------------------------------------
-                if (in.joyX < 1800) {
-                    contSpeed = map(constrain((int)in.joyX, 0, 1800), 1800, 0, 0, 100);
-                } else if (in.joyX > 2200) {
-                    contSpeed = map(constrain((int)in.joyX, 2200, 4095), 2200, 4095, 0, -100);
-                } else {
-                    contSpeed = 0;
-                }
-
-                // Koncové dorazy:
-                if (in.limitMin && contSpeed > 0) contSpeed = 0;
-                if (in.limitMax && contSpeed < 0) contSpeed = 0;
-
-                sensorManager.setServoCont(contSpeed);
-
-                // Efekt plynulé změny barvy na LED pásku v ostatních módech (každých 250 ms spolu s výpisem)
+                // 2. Efekt plynulé duhy na spodním LED pásku (každých 250 ms)
                 if (now - lastPrintTime >= 250) {
-                    uint32_t colors[8];
-                    for (int i = 0; i < 8; i++) {
-                        uint8_t hue = (ledHue + (i * 32)) & 255;
-                        uint8_t region = hue / 43;
-                        uint8_t remainder = (hue - (region * 43)) * 6;
-                        uint8_t q = 255 - remainder;
-                        uint8_t t = remainder;
-                        uint8_t r = 0, g = 0, b = 0;
-                        switch (region) {
-                            case 0: r = 255; g = t; b = 0; break;
-                            case 1: r = q; g = 255; b = 0; break;
-                            case 2: r = 0; g = 255; b = t; break;
-                            case 3: r = 0; g = q; b = 255; break;
-                            case 4: r = t; g = 0; b = 255; break;
-                            default: r = 255; g = 0; b = q; break;
-                        }
-                        colors[i] = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-                    }
-                    sensorManager.setLedStrip(colors, 8);
-                    ledHue += 5;
+                    updateClassicRainbowStrip(ledHue);
                 }
                 break;
             }

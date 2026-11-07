@@ -34,13 +34,14 @@
 
 // =============================================================================
 // Stavový automat pro rotační enkodér (přesně z větve encoder_upgrade)
+// Bezpečný pro přerušení (IRAM_ATTR) – tabulka v DRAM, čas přes esp_timer_get_time()
 // =============================================================================
 #ifdef ENABLE_ENCODER
 #define ENC_DIR_NONE 0x00
 #define ENC_DIR_CW   0x10
 #define ENC_DIR_CCW  0x20
 
-static const uint8_t PROGMEM enc_state_table[7][4] = {
+DRAM_ATTR static const uint8_t enc_state_table[7][4] = {
     // 00: START
     {0x0, 0x2, 0x4, 0x0},
     // 01: CW_FINAL
@@ -59,20 +60,25 @@ static const uint8_t PROGMEM enc_state_table[7][4] = {
 
 static volatile int32_t isrEncoderPos = 0;
 static volatile uint8_t isrEncoderState = 0;
-static volatile unsigned long lastIsrStepTime = 0;
+static volatile int64_t lastIsrStepTimeUs = 0;
 
 static void IRAM_ATTR encoderISR() {
-    uint8_t pinState = (digitalRead(PIN_ENC_CLK) << 1) | digitalRead(PIN_ENC_DT);
-    isrEncoderState = pgm_read_byte(&enc_state_table[isrEncoderState & 0x0F][pinState]);
+    // Přímé hardwarové čtení registrů GPIO bez volání funkcí z Flash paměti:
+    // PIN_ENC_CLK = GPIO 32 -> registr in1 (bit 0)
+    // PIN_ENC_DT  = GPIO 4  -> registr in  (bit 4)
+    uint32_t clk = (GPIO.in1.data & 0x01);
+    uint32_t dt  = (GPIO.in >> 4) & 0x01;
+    uint8_t pinState = (clk << 1) | dt;
+
+    isrEncoderState = enc_state_table[isrEncoderState & 0x0F][pinState];
     uint8_t result = isrEncoderState & 0x30;
 
     if (result == ENC_DIR_CW || result == ENC_DIR_CCW) {
-        unsigned long nowUs = micros();
-        // Ochranné okno 60 ms (60 000 us) přímo v přerušení:
-        // Spolehlivě eliminuje dozvuky mechanické pružinky zubu (cca 35-50 ms),
-        // ale zachovává bleskovou odezvu na lidské otáčení.
-        if (nowUs - lastIsrStepTime >= 60000) {
-            lastIsrStepTime = nowUs;
+        // esp_timer_get_time() leží přímo v IRAM paměti (0x40085efc)
+        int64_t nowUs = esp_timer_get_time();
+        // Ochranné okno 60 ms (60 000 us) pro eliminaci mechanických zákmitů kontaktů
+        if (nowUs - lastIsrStepTimeUs >= 60000) {
+            lastIsrStepTimeUs = nowUs;
             if (result == ENC_DIR_CW) {
                 isrEncoderPos = (isrEncoderPos + 1) % 12;
             } else {

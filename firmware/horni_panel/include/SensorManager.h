@@ -21,7 +21,7 @@ public:
     void readIRDistance();      // Infračervený senzor vzdálenosti
     void readIRObstacle();      // Digitální IR senzor detekce překážky
     void readPhotoresistors();  // 2x Analogový fotorezistor
-    void readTopButton();       // Tlačítko na horním panelu
+    bool readTopButtonRaw();       // Přečte čistý stav pinu PIN_BTN1 (true = stisknuto)
     void readColorSensor();     // Barevný senzor (TCS34725)
     // Gyroskop a akcelerometr
     void calibrateIMU();
@@ -43,6 +43,7 @@ public:
     void setLed2(bool on);
     void setLed3(bool on);
     void setColorSensorLed(bool on);
+    void setColorSensorLedBrightness(uint8_t brightness); // PWM regulace 0 až 255 (limitováno na TCS_LED_MAX_BRIGHT)
 
     // 8-LED RGB pásek WS2812B (Fyzicky zobrazí a uloží barvy do SensorData)
     void setLedStrip(const uint32_t leds[8], uint8_t brightness = 60);
@@ -76,10 +77,6 @@ public:
     void setBottomOledText();
 
 private:
-    bool lastTopBtnState = false;
-    uint32_t topBtnPressStartTime = 0;
-    bool topBtnLongPressHandled = false;
-
     // Stav pro komplementární filtr a integraci IMU (LSM6DS3)
     float imuAngleX = 0.0f;
     float imuAngleY = 0.0f;

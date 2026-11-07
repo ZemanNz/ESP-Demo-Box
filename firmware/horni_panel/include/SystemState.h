@@ -259,37 +259,7 @@ public:
         prepniInfoOverlay();
     }
 
-    void checkModeChange() {
-        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
-            int32_t encoderDiff = sensors.encoderPos - lastProcessedEncoderPos;
-            if (encoderDiff != 0) {
-                lastProcessedEncoderPos = sensors.encoderPos;
-                
-                // Přepínáme běžné módy pouze pokud nejsme v režimu spánku
-                if (currentMode != MODE_SLEEP) {
-                    const int FIRST_MODE = (int)MODE_MAIN_MENU;
-                    const int LAST_MODE  = (int)MODE_BAREVNY; // Poslední standardní mód před SLEEP
-                    const int NUM_MODES  = LAST_MODE - FIRST_MODE + 1;
-                    
-                    int nextMode = ((int)currentMode + encoderDiff) % NUM_MODES;
-                    if (nextMode < 0) {
-                        nextMode += NUM_MODES;
-                    }
-                    nextMode += FIRST_MODE;
-                    
-                    if (currentMode != MODE_SLEEP) {
-                        lastMode = currentMode;
-                    }
-                    currentMode = (AppMode)nextMode;
-                    infoActive = false;
-                    uiNeedsUpdate = true;
-                    bottomNeedsTx = true;
-                    Serial.printf("[ENCODER] Prepinam mod na: %d\n", nextMode);
-                }
-            }
-            xSemaphoreGive(stateMutex);
-        }
-    }
+
 
     void setMenuCursorIndex(int idx) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
@@ -500,8 +470,8 @@ public:
     // 3x LED diody na horním panelu
     void updateLeds(bool l1, bool l2, bool l3) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
-            sensors.led_ult = l1;
-            sensors.led_ir = l2;
+            sensors.led_ir = l1;
+            sensors.led_ult = l2;
             sensors.led_laser = l3;
             xSemaphoreGive(stateMutex);
         }

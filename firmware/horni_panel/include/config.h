@@ -191,6 +191,10 @@
 #define PIN_LED_3            PIN_LED3
 #define PIN_TCS_LED          19   // LED osvětlení barevného senzoru TCS34725
 #define PIN_COLOR_LED        PIN_TCS_LED
+#define LEDC_CHAN_TCS_LED    4    // PWM kanál pro LED barevného senzoru
+#define LEDC_FREQ_TCS_LED    5000 // Frekvence 5 kHz (bez pískání a blikání)
+#define LEDC_RES_TCS_LED     8    // 8-bitové rozlišení (0 až 255)
+#define TCS_LED_MAX_BRIGHT   160  // Maximální dovolený jas (sníženo na 160 pro příjemný svit)
 #define PIN_WS2812B          42   // Datový pin pro adresovatelný LED pásek WS2812B
 #define PIN_LED_STRIP        PIN_WS2812B
 #define WS2812B_NUM_LEDS      8   // Počet LED diod na horním pásku

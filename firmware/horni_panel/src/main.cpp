@@ -57,6 +57,155 @@ void resetHighScore(const char* key, int &bestScore) {
     Serial.printf("[HIGHSCORE] Rekord pro %s byl resetovan na 0!\n", key);
 }
 
+// =============================================================================
+// MODUL: KLASICKÉ BĚŽNÉ FUNKCE (CLASSIC THINGS)
+// Opakovatelné standardní obsluhy senzorů a výstupů pro většinu módů
+// =============================================================================
+
+// 1. Sedmisegmentový displej + stavové LEDky nad senzory (Laser, IR vzdálenost, IR překážka, Ultrazvuk)
+void updateClassicSevenSegment(unsigned long now) {
+    static unsigned long lastRun = 0;
+    if (now - lastRun < 40) return;
+    lastRun = now;
+
+    sensorManager.readVL53L0X();
+    sensorManager.readIRDistance();
+    sensorManager.readIRObstacle();
+
+    SensorData data = globalState.getSensorData();
+    int segVal = -1;
+
+    if(data.btnDown[0]){
+        globalState.updateLeds(1,0,0);
+    }
+    else if(data.btnDown[1]){
+        globalState.updateLeds(0,1,0);
+    }
+    else if(data.btnDown[2]){
+        globalState.updateLeds(0,0,1);
+    }
+
+    data = globalState.getSensorData();
+
+    if(data.led_ir){
+        segVal = (int)data.irDistanceCm;
+    }
+    if(data.led_laser){
+        segVal = data.laserDistanceMm / 10;
+    }
+    if(data.led_ult){
+        segVal = (int)data.ultrasonicDistanceCm;
+    }
+
+    sensorManager.set7Segment(segVal);
+    sensorManager.setLeds(data.led_ir, data.led_ult, data.led_laser);
+}
+
+// 2. Barevný RGB senzor (TCS34725) + Horní LED pásek + Adaptivní PWM LED přisvícení
+void updateClassicColorStrip(unsigned long now) {
+    static unsigned long lastRun = 0;
+    if (now - lastRun < 40) return;
+    lastRun = now;
+
+    sensorManager.readPhotoresistors();
+    sensorManager.readColorSensor();
+
+    SensorData data = globalState.getSensorData();
+
+    // Přepočet a saturované zesílení barev pro horní LED pásek
+    float cr = (float)data.colorR;
+    float cg = (float)data.colorG * 1.35f; // Posílení zelené složky
+    float cb = (float)data.colorB * 0.85f; // Mírné zkrocení modré složky
+
+    float maxC = max(cr, max(cg, cb));
+    float minC = min(cr, min(cg, cb));
+    float deltaC = maxC - minC;
+
+    uint8_t outR = 0, outG = 0, outB = 0;
+    if (deltaC > 8.0f) {
+        float avgC = (cr + cg + cb) / 3.0f;
+        float satFactor = 2.4f; // Zvýraznění živosti odstínu na pásku
+        
+        float rBoost = max(0.0f, avgC + (cr - avgC) * satFactor);
+        float gBoost = max(0.0f, avgC + (cg - avgC) * satFactor);
+        float bBoost = max(0.0f, avgC + (cb - avgC) * satFactor);
+
+        float highest = max(rBoost, max(gBoost, bBoost));
+        if (highest > 0.0f) {
+            outR = (uint8_t)((rBoost / highest) * 255.0f);
+            outG = (uint8_t)((gBoost / highest) * 255.0f);
+            outB = (uint8_t)((bBoost / highest) * 255.0f);
+        }
+    } else if (maxC > 15.0f) {
+        outR = 180; outG = 180; outB = 180;
+    }
+
+    uint32_t stripColor = ((uint32_t)outR << 16) | ((uint32_t)outG << 8) | (uint32_t)outB;
+    uint8_t stripBright = (stripColor == 0) ? 5 : 25;
+    sensorManager.setLedStripColor(stripColor, stripBright);
+
+    // Plynulé adaptivní řízení jasu LED barevného senzoru TCS34725 podle fotorezistorů (stále stejné pro všechny módy)
+    uint32_t avgPhoto = ((uint32_t)data.photo1 + (uint32_t)data.photo2) / 2;
+    uint8_t tcsBright = (uint8_t)map(constrain((int)avgPhoto, 200, 3800), 200, 3800, TCS_LED_MAX_BRIGHT, 40);
+    sensorManager.setColorSensorLedBrightness(tcsBright);
+}
+
+// 3. Ultrazvukový senzor vzdálenosti (HC-SR04)
+void updateClassicUltrasonic(unsigned long now) {
+    static unsigned long lastRun = 0;
+    if (now - lastRun < 100) return;
+    lastRun = now;
+    sensorManager.readUltrasonic();
+}
+
+// 4. Teplota a vlhkost (DHT senzor)
+void updateClassicDHT(unsigned long now) {
+    static unsigned long lastRun = 0;
+    if (now - lastRun < 1500) return;
+    lastRun = now;
+    sensorManager.readDHT();
+}
+
+// 5. Znakový I2C LCD 1602 displej (teplota/vlhkost + čas běhu)
+void updateClassicLcd1602(unsigned long now) {
+    static unsigned long lastRun = 0;
+    if (now - lastRun < 250) return;
+    lastRun = now;
+
+    SensorData data = globalState.getSensorData();
+    String lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
+
+    char timeBuf[17];
+    unsigned long totalSeconds = now / 1000;
+    if (totalSeconds < 60) {
+        // Do jedné minuty zobrazujeme sekundy: např. "TIME: 45s"
+        snprintf(timeBuf, sizeof(timeBuf), "TIME: %lus", totalSeconds);
+    } else {
+        // Od jedné minuty zobrazujeme MM:SS: např. "TIME: 02:15"
+        unsigned long minutes = totalSeconds / 60;
+        unsigned long seconds = totalSeconds % 60;
+        snprintf(timeBuf, sizeof(timeBuf), "TIME: %02lu:%02lu", minutes, seconds);
+    }
+    String lcdLine2 = String(timeBuf);
+
+    sensorManager.writeLCD1602(lcdLine1, lcdLine2);
+}
+
+// 6. Hlavní zastřešující funkce pro klasické senzory a výstupy
+void handleClassicSensors(unsigned long now, bool enable7Seg = true, bool enableStrip = true, bool enableLcd = true) {
+    if (enable7Seg) {
+        updateClassicSevenSegment(now);
+    }
+    if (enableStrip) {
+        updateClassicColorStrip(now);
+    }
+    updateClassicUltrasonic(now);
+    updateClassicDHT(now);
+    if (enableLcd) {
+        updateClassicLcd1602(now);
+    }
+}
+
 // ---------------------------------------------------------
 // 1. Task: Wi-Fi a WebServer (Poběží na Core 0)
 // ---------------------------------------------------------
@@ -301,12 +450,131 @@ void Task_Sensors(void *pvParameters) {
     // Prvotní kalibrace gyroskopu po zapnutí
     sensorManager.calibrateIMU();
 
+    // Seznam všech 12 přepínatelných módů (mimo MODE_SLEEP)
+    static const AppMode kSelectableModes[] = {
+        MODE_MAIN_MENU,
+        MODE_GYRO,
+        MODE_GAME_SNAKE,
+        MODE_GAME_FLAPPY,
+        MODE_2048,
+        MODE_GAME_TETRIS,
+        MODE_VZDALENOST,
+        MODE_WIFI_SPOJENI,
+        MODE_WIFI_DETECTION,
+        MODE_SERVA,
+        MODE_MOTOR,
+        MODE_BAREVNY
+    };
+    static const int kNumSelectableModes = sizeof(kSelectableModes) / sizeof(kSelectableModes[0]);
+
+    // Stavové proměnné pro rotační enkodér (rádio stanice)
+    static int32_t lastEncoderPos = 0;
+    static bool encoderInitialized = false;
+    static int32_t accumulatedDelta = 0;
+    static int lastStepDirection = 0;
+    static unsigned long lastDirectionSwitchTime = 0;
+
+    // Stavové proměnné pro horní fyzické tlačítko
+    static bool lastBtnPressed = false;
+    static uint32_t btnPressStartTime = 0;
+    static bool longPressHandled = false;
+    SensorData start = globalState.getSensorData();
+
+    sensorManager.setLeds(0, 1, 0);
+    
+
     for (;;) {
         unsigned long now = millis();
+        SensorData currentSensors = globalState.getSensorData();
         AppMode currentMode = globalState.getMode();
 
-        // Kontrola otočení rotačního enkodéru pro okamžitou manuální změnu módu
-        globalState.checkModeChange();
+        // -------------------------------------------------------------
+        // 1. PŘEPÍNÁNÍ MÓDŮ ROTAČNÍM ENKODÉREM (RÁDIO STANICE)
+        // -------------------------------------------------------------
+        if (!encoderInitialized) {
+            lastEncoderPos = currentSensors.encoderPos;
+            encoderInitialized = true;
+        }
+
+        if (currentMode != MODE_SLEEP && currentSensors.encoderPos != lastEncoderPos) {
+            int32_t diff = currentSensors.encoderPos - lastEncoderPos;
+            lastEncoderPos = currentSensors.encoderPos;
+            accumulatedDelta += diff;
+
+            // Vyžadujeme akumulaci 2 pulzů pro přepnutí stanice (stabilní krok bez náhodného šumu)
+            if (abs(accumulatedDelta) >= 2) {
+                int direction = (accumulatedDelta > 0) ? 1 : -1;
+                accumulatedDelta = 0; // Vyresetujeme střadač
+
+                // Ochrana proti okamžitému kmitání tam a zpět (antireverzní filtr 250 ms)
+                if (direction == -lastStepDirection && (now - lastDirectionSwitchTime < 250)) {
+                    // Ignorujeme okamžitý falešný odraz zpět
+                } else {
+                    lastStepDirection = direction;
+                    lastDirectionSwitchTime = now;
+
+                    // Najdeme aktuální index módu
+                    int currentIndex = 0;
+                    for (int i = 0; i < kNumSelectableModes; i++) {
+                        if (kSelectableModes[i] == currentMode) {
+                            currentIndex = i;
+                            break;
+                        }
+                    }
+
+                    // Posuneme se přesně o 1 mód (doprava nebo doleva)
+                    int newIndex = (currentIndex + direction + kNumSelectableModes) % kNumSelectableModes;
+                    AppMode targetMode = kSelectableModes[newIndex];
+
+                    Serial.printf("[ENCODER RADIO] Krok: %+d | Prepinam: %d -> %d\n", direction, (int)currentMode, (int)targetMode);
+                    globalState.setMode(targetMode);
+                    currentMode = targetMode; // Okamžitá aktualizace pro zbytek smyčky senzoru
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 2. GLOBÁLNÍ OBSLUHA HORNÍHO TLAČÍTKA A BZUČÁKU (PRO VŠECHNY MÓDY)
+        // -------------------------------------------------------------
+        bool isPressed = sensorManager.readTopButtonRaw();
+
+        // A) Náběžná hrana stisku (uživatel právě zmáčkl tlačítko)
+        if (isPressed && !lastBtnPressed) {
+            btnPressStartTime = now;
+            longPressHandled = false;
+        }
+
+        // B) Dlouhé podržení (>= 1000 ms) -> Přechod do SLEEP módu
+        if (isPressed && !longPressHandled) {
+            if (now - btnPressStartTime >= 1000) {
+                longPressHandled = true;
+                Serial.println("[BTN] 1s podrzeni horniho tlacitka -> SLEEP");
+                #ifdef ENABLE_BUZZER
+                sensorManager.beep(1200, 150); // Hlubší tón při uspání
+                #endif
+                globalState.setInfoOverlay(false);
+                globalState.setMode(MODE_SLEEP);
+                currentMode = MODE_SLEEP;
+            }
+        }
+
+        // C) Sestupná hrana (uživatel tlačítko pustil) -> Krátký stisk pro TOGGLE INFO
+        if (!isPressed && lastBtnPressed) {
+            // Pouze pokud to nebyl dlouhý stisk pro sleep a trval alespoň 40 ms (debounce)
+            if (!longPressHandled && (now - btnPressStartTime >= 40)) {
+                Serial.println("[BTN] Kratky stisk horniho tlacitka -> Toggle INFO OVERLAY");
+                #ifdef ENABLE_BUZZER
+                sensorManager.beep(2400, 60); // Krátké potvrzovací pípnutí
+                #endif
+                globalState.toggleInfo();
+            }
+        }
+        lastBtnPressed = isPressed;
+
+        // Vzorkování a integrace IMU (LSM6DS3) každých 10 ms pro všechny aktivní módy
+        if (currentMode != MODE_SLEEP) {
+            sensorManager.readIMU();
+        }
 
         // -------------------------------------------------------------
         // VÝKONNÁ LOGIKA PODLE AKTUÁLNÍHO MÓDU (State Machine)
@@ -321,49 +589,14 @@ void Task_Sensors(void *pvParameters) {
 
             // =======================================================
             case MODE_GYRO: {
-                // 1. Integrace gyroskopu LSM6DS3 (každých 10 ms)
-                sensorManager.readIMU();
+                // 1. Klasické věci: 7-segmentovka, barevný pásek i DHT běží standardně;
+                // LCD displej máme vypnutý, protože na něm chceme úhly gyroskopu!
+                handleClassicSensors(now, true, true, false);
 
-                // 2. Rychlé senzory (každých 40 ms)
-                if (now - lastOtherSensors >= 40) {
-                    lastOtherSensors = now;
-                    sensorManager.readVL53L0X();
-                    sensorManager.readIRDistance();
-                    sensorManager.readIRObstacle();
-                    sensorManager.readPhotoresistors();
-                    sensorManager.readTopButton();
-                    sensorManager.readColorSensor();
-
-                    SensorData data = globalState.getSensorData();
-                    int segVal = -1;
-                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-                        segVal = data.laserDistanceMm / 10;
-                    } else if (data.irDistanceCm > 0) {
-                        segVal = (int)data.irDistanceCm;
-                    } else if (data.ultrasonicDistanceCm > 0) {
-                        segVal = (int)data.ultrasonicDistanceCm;
-                    }
-                    sensorManager.set7Segment(segVal);
-
-                    uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-                    uint8_t stripBright = (stripColor == 0) ? 5 : 15;
-                    sensorManager.setLedStripColor(stripColor, stripBright);
-
-                    bool led_ir    = data.irObstacle;
-                    bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
-                    bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
-                    sensorManager.setLeds(led_ir, led_ult, led_laser);
-                }
-
-                // 3. Ultrazvuk (každých 100 ms)
-                if (now - lastUltrasonic >= 100) {
-                    lastUltrasonic = now;
-                    sensorManager.readUltrasonic();
-                }
-
-                // 4. Znakový LCD 1602 (každých 250 ms)
-                if (now - lastLcdUpdate >= 250) {
-                    lastLcdUpdate = now;
+                // 2. Vlastní specifické zobrazení gyroskopu na LCD 1602 (každých 250 ms)
+                static unsigned long lastGyroLcd = 0;
+                if (now - lastGyroLcd >= 250) {
+                    lastGyroLcd = now;
                     SensorData data = globalState.getSensorData();
                     char l1[17], l2[17];
                     snprintf(l1, sizeof(l1), "X:%+5.1f Y:%+5.1f", data.gyroX, data.gyroY);
@@ -380,8 +613,6 @@ void Task_Sensors(void *pvParameters) {
 
             // =======================================================
             case MODE_GAME_SNAKE: {
-                sensorManager.readIMU();
-
                 static int step_led_counter = 3;
 
                 if (now - lastLcdUpdate >= 250) {
@@ -422,17 +653,15 @@ void Task_Sensors(void *pvParameters) {
                     sensorManager.setBuiltinRgb(0, 5, 0);   // Jemná zelená při hře
                 }
 
-#if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
-                sensorManager.set7SegmentText(snake.isGameOver() ? " gg" : "LOL");
-#endif
+                #if defined(ENABLE_7SEG_GAME_TEXT) && ENABLE_7SEG_GAME_TEXT
+                                sensorManager.set7SegmentText(snake.isGameOver() ? " gg" : "LOL");
+                #endif
                     
                 break;
             }
 
             // =======================================================
             case MODE_GAME_FLAPPY: {
-                sensorManager.readIMU();
-
                 // 1. Znakový LCD 1602 displej (každých 250 ms)
                 if (now - lastLcdUpdate >= 250) {
                     lastLcdUpdate = now;
@@ -487,8 +716,6 @@ void Task_Sensors(void *pvParameters) {
 
             // =======================================================
             case MODE_2048: {
-                sensorManager.readIMU();
-
                 // 1. Znakový LCD 1602 displej (každých 250 ms)
                 if (now - lastLcdUpdate >= 250) {
                     lastLcdUpdate = now;
@@ -534,8 +761,6 @@ void Task_Sensors(void *pvParameters) {
 
             // =======================================================
             case MODE_GAME_TETRIS: {
-                sensorManager.readIMU();
-
                 // 1. Znakový LCD 1602 displej (každých 250 ms)
                 if (now - lastLcdUpdate >= 250) {
                     lastLcdUpdate = now;
@@ -588,67 +813,13 @@ void Task_Sensors(void *pvParameters) {
             case MODE_MOTOR:
             case MODE_BAREVNY:
             default: {
-                // Původní společná logika senzorů a displeje pro ostatní režimy:
-                sensorManager.readIMU();
-
-                if (now - lastOtherSensors >= 40) {
-                    lastOtherSensors = now;
-                    sensorManager.readVL53L0X();
-                    sensorManager.readIRDistance();
-                    sensorManager.readIRObstacle();
-                    sensorManager.readPhotoresistors();
-                    sensorManager.readTopButton();
-                    sensorManager.readColorSensor();
-
-                    SensorData data = globalState.getSensorData();
-                    int segVal = -1;
-                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-                        segVal = data.laserDistanceMm / 10;
-                    } else if (data.irDistanceCm > 0) {
-                        segVal = (int)data.irDistanceCm;
-                    } else if (data.ultrasonicDistanceCm > 0) {
-                        segVal = (int)data.ultrasonicDistanceCm;
-                    }
-                    sensorManager.set7Segment(segVal);
-
-                    sensorManager.setBuiltinRgb(0, 0, 0);
-
-                    uint32_t stripColor = ((uint32_t)data.colorR << 16) | ((uint32_t)data.colorG << 8) | (uint32_t)data.colorB;
-                    uint8_t stripBright = (stripColor == 0) ? 5 : 15;
-                    sensorManager.setLedStripColor(stripColor, stripBright);
-
-                    bool led_ir    = data.irObstacle;
-                    bool led_ult   = (data.ultrasonicDistanceCm > 0 && data.ultrasonicDistanceCm < 40.0f);
-                    bool led_laser = (data.laserDistanceMm > 0 && data.laserDistanceMm < 300);
-                    sensorManager.setLeds(led_ir, led_ult, led_laser);
-                }
-
-                if (now - lastUltrasonic >= 100) {
-                    lastUltrasonic = now;
-                    sensorManager.readUltrasonic();
-                }
-
-                if (now - lastLcdUpdate >= 250) {
-                    lastLcdUpdate = now;
-                    SensorData data = globalState.getSensorData();
-                    String lcdLine1 = "T:" + String(data.temperature, 1) + "C H:" + String(data.humidity, 0) + "%";
-                    String lcdLine2;
-                    if (data.laserDistanceMm > 0 && data.laserDistanceMm < 2000) {
-                        lcdLine2 = "Laser: " + String(data.laserDistanceMm) + " mm";
-                    } else if (data.irDistanceCm > 0) {
-                        lcdLine2 = "IR: " + String(data.irDistanceCm, 1) + " cm";
-                    } else if (data.ultrasonicDistanceCm > 0) {
-                        lcdLine2 = "Ultra: " + String(data.ultrasonicDistanceCm, 1) + " cm";
-                    } else {
-                        lcdLine2 = "IR: " + String(data.irObstacle ? "OBSTACLE" : "CLEAR");
-                    }
-                    sensorManager.writeLCD1602(lcdLine1, lcdLine2);
-                }
-
-                if (now - lastDhtUpdate >= 1500) {
-                    lastDhtUpdate = now;
-                    sensorManager.readDHT();
-                }
+                // Kompletní obsluha všech klasických periferií:
+                // - 7-segmentový displej + indikační LEDky (Laser, IR vzdálenost, IR překážka, Ultrazvuk)
+                // - Horní LED pásek v barvě TCS34725 + adaptivní přísvit bílé LED
+                // - Ultrazvuk HC-SR04
+                // - DHT teplota a vlhkost
+                // - Znakový I2C LCD 1602 (teplota/vlhkost + vzdálenost / stav překážky)
+                handleClassicSensors(now);
                 break;
             }
         }
@@ -700,108 +871,88 @@ void Task_Display_UI(void *pvParameters) {
     unsigned long casPoslednihoKroku = 0;
     byte delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
 
-    // Inicializace gfx je hotová v HardwareSetup. Nyní můžeme kreslit.
-    static bool lastBtnDown[5] = {false, false, false, false, false};
-    static bool lastBtnTop = false;
-    static int32_t lastEncoderPos = 0;
-    static bool encoderInitialized = false;
-
-    // Seznam všech 12 přepínatelných módů (mimo MODE_SLEEP)
-    static const AppMode kSelectableModes[] = {
-        MODE_MAIN_MENU,
-        MODE_GYRO,
-        MODE_GAME_SNAKE,
-        MODE_GAME_FLAPPY,
-        MODE_2048,
-        MODE_GAME_TETRIS,
-        MODE_VZDALENOST,
-        MODE_WIFI_SPOJENI,
-        MODE_WIFI_DETECTION,
-        MODE_SERVA,
-        MODE_MOTOR,
-        MODE_BAREVNY
-    };
-    static const int kNumSelectableModes = sizeof(kSelectableModes) / sizeof(kSelectableModes[0]);
-
     for (;;) {
         // 1. Zjistíme, v jakém stavu se kufr zrovna nachází
         AppMode currentMode = globalState.getMode();
 
-        // ---------------------------------------------------------
-        // OBSLUHA FYZICKÝCH / VIRTUÁLNÍCH TLAČÍTEK A ENKODÉRU PRO PŘEPÍNÁNÍ MÓDŮ
-        // ---------------------------------------------------------
-        SensorData currentSensors = globalState.getSensorData();
-
-        // Inicializace enkodéru po startu / prvním paketu z UARTu
-        if (!encoderInitialized) {
-            lastEncoderPos = currentSensors.encoderPos;
-            encoderInitialized = true;
-        }
-
-        // PŘEPÍNÁNÍ MÓDŮ ROTAČNÍM ENKODÉREM (rádio stanice s hysterezí a ochranou proti šumu)
-        static int32_t accumulatedDelta = 0;
-        static int lastStepDirection = 0;
-        static unsigned long lastDirectionSwitchTime = 0;
-        unsigned long nowEncoderTime = millis();
-
-        if (currentMode != MODE_SLEEP && currentSensors.encoderPos != lastEncoderPos) {
-            int32_t diff = currentSensors.encoderPos - lastEncoderPos;
-            lastEncoderPos = currentSensors.encoderPos;
-            accumulatedDelta += diff;
-
-            // Vyžadujeme akumulaci 2 pulzů pro přepnutí stanice (stabilní krok bez náhodného šumu)
-            if (abs(accumulatedDelta) >= 2) {
-                int direction = (accumulatedDelta > 0) ? 1 : -1;
-                accumulatedDelta = 0; // Vyresetujeme střadač
-
-                // Ochrana proti okamžitému kmitání tam a zpět (antireverzní filtr 250 ms)
-                // Zabraňuje samovolnému probliknutí a resetu hry
-                if (direction == -lastStepDirection && (nowEncoderTime - lastDirectionSwitchTime < 250)) {
-                    // Ignorujeme okamžitý falešný odraz zpět
-                } else {
-                    lastStepDirection = direction;
-                    lastDirectionSwitchTime = nowEncoderTime;
-
-                    // Najdeme aktuální index módu
-                    int currentIndex = 0;
-                    for (int i = 0; i < kNumSelectableModes; i++) {
-                        if (kSelectableModes[i] == currentMode) {
-                            currentIndex = i;
-                            break;
-                        }
-                    }
-
-                    // Posuneme se přesně o 1 mód (doprava nebo doleva)
-                    int newIndex = (currentIndex + direction + kNumSelectableModes) % kNumSelectableModes;
-                    AppMode targetMode = kSelectableModes[newIndex];
-
-                    Serial.printf("[ENCODER RADIO] Krok: %+d | Prepinam: %d -> %d\n", direction, (int)currentMode, (int)targetMode);
-                    globalState.setMode(targetMode);
-                    currentMode = targetMode;
-                }
-            }
-        }
-
-        // Horní fyzické tlačítko: Návrat do Menu nebo info + pípnutí pro otestování bzučáku
-        if (currentSensors.btnTop && !lastBtnTop) {
-            #ifdef ENABLE_BUZZER
-            sensorManager.beep(2400, 60); // Krátké potvrzovací pípnutí při stisku tlačítka
-            #endif
-            if (currentMode != MODE_MAIN_MENU) {
-                globalState.setMode(MODE_MAIN_MENU);
-                currentMode = MODE_MAIN_MENU;
-            } else {
-                globalState.toggleInfo();
-            }
-        }
-        lastBtnTop = currentSensors.btnTop;
-        
         // 2. Potřebujeme kompletně překreslit obrazovku? 
         // (Vlajka je true jen těsně po přepnutí stavu nebo stisku tlačítka)
         bool needsFullRedraw = globalState.popUiNeedsUpdate();
 
-        //vykreslujeme info?
+        // Vykreslujeme univerzální INFO overlay?
         bool infoActive = globalState.isInfoActive();
+        if (infoActive) {
+            if (needsFullRedraw) {
+                gfx.clearScreen(ST77XX_BLACK);
+                gfx.drawRoundRect(10, 10, 300, 220, 8, ST77XX_YELLOW);
+                
+                String title = "NAPOVEDA";
+                switch (currentMode) {
+                    case MODE_MAIN_MENU:      title = "INFO: HLAVNI MENU"; break;
+                    case MODE_GYRO:           title = "INFO: GYROSKOP"; break;
+                    case MODE_GAME_SNAKE:     title = "INFO: HRA HAD (SNAKE)"; break;
+                    case MODE_GAME_FLAPPY:    title = "INFO: FLAPPY BIRD"; break;
+                    case MODE_2048:           title = "INFO: HRA 2048"; break;
+                    case MODE_GAME_TETRIS:    title = "INFO: TETRIS"; break;
+                    case MODE_VZDALENOST:     title = "INFO: SENZORY VZDAL."; break;
+                    case MODE_WIFI_SPOJENI:   title = "INFO: WI-FI SPOJENI"; break;
+                    case MODE_WIFI_DETECTION: title = "INFO: WI-FI RADAR CSI"; break;
+                    case MODE_SERVA:          title = "INFO: SERVA"; break;
+                    case MODE_MOTOR:          title = "INFO: DC MOTOR"; break;
+                    case MODE_BAREVNY:        title = "INFO: BAREVNY SENZOR"; break;
+                    default: break;
+                }
+                gfx.drawTextPartial(25, 22, title, ST77XX_YELLOW, ST77XX_BLACK, 2);
+
+                switch (currentMode) {
+                    case MODE_MAIN_MENU:
+                        gfx.drawTextPartial(20, 52, "- Enkoder: Rotace meni mody", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 72, "- Joy stisk: Rychly vyber", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 92, "- Potenciometr: Uhel serva", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 112, "- Joystick Y: Kontinualni servo", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 132, "- Dolni tlacitka: Volba 7-seg", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 152, "- Switch 1: Motor | SW2: LX-16A", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 172, "- Horni tlac. (1s): Rezim spanku", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                    case MODE_BAREVNY:
+                        gfx.drawTextPartial(20, 55, "- RGB senzor TCS34725 (I2C_1)", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 75, "- Vlevo: Hodnoty slozek R, G, B", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 95, "- Vpravo: Color wheel + vzorek", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 115, "- Sipka ukazuje detekovany odstin", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 135, "- LED podsviceni: Adaptivni PWM", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 155, "- Rizeno podle fotorezistoru", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 175, "- Horni pasek: Barva dle senzoru", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                    case MODE_GYRO:
+                        gfx.drawTextPartial(20, 55, "- 6-osy senzor LSM6DS3 (I2C)", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 80, "- Vykresluje 3D naklon kufru", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 105, "- Osa X, Y, Z v realnem case", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 130, "- Detekce narazu / otresu (Shock)", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 155, "- Spodni panel: Vypnut", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                    case MODE_GAME_SNAKE:
+                    case MODE_GAME_FLAPPY:
+                    case MODE_2048:
+                    case MODE_GAME_TETRIS:
+                        gfx.drawTextPartial(20, 55, "- Ovladani: Joystick / Tlacitka", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 80, "- Dolni OLED: Skore a herni cas", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 105, "- LED pasky: Herni efekty / barvy", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 130, "- Autopilot: Aktivni pri necinnosti", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 155, "- Konec hry: Automaticky restart", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                    default:
+                        gfx.drawTextPartial(20, 60, "- Prepinani modu: Otocenim enkoderu", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 90, "- Podrzeni tlacitka (1s): Sleep", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 120, "- Web rozhrani: Pripojeni pres Wi-Fi", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 150, "- IP adresa: 192.168.4.1", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                }
+                
+                gfx.drawTextPartial(35, 202, "[Stiskni horni tlacitko pro navrat]", ST77XX_GREEN, ST77XX_BLACK, 1);
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue; // Nepokračujeme do vykreslování aktivního módu
+        }
 
         // 3. Vykreslujeme podle módu
         switch (currentMode) {
@@ -1031,6 +1182,8 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setColorSensorLed(true);
                 #endif
 
+                sensorManager.setLeds(0,1,0);
+
                 Serial.printf("\n[SYSTEM] Probudil jsem se z Light Sleep! (Duvod kod: %d) -> ", (int)duvod);
                 if (gyroWoke) {
                     Serial.printf("PROBUZENO OTRESEM / TUKNUTIM DO GYROSKOPU! (src=0x%02X, isr=%d, pin=%d)\n",
@@ -1055,26 +1208,7 @@ void Task_Display_UI(void *pvParameters) {
             // =======================================================
             case MODE_MAIN_MENU: {
                 delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
-                bool isInfo = globalState.isInfoActive();
-                
-                if (isInfo) {
-                    if (needsFullRedraw) {
-                        // INFO OVERLAY pro Hlavní menu
-                        gfx.clearScreen(ST77XX_BLACK);
-                        gfx.drawRoundRect(10, 10, 300, 220, 8, ST77XX_YELLOW);
-                        gfx.drawTextPartial(30, 25, "INFO: HLAVNI MENU", ST77XX_YELLOW, ST77XX_BLACK, 2);
-                        
-                        gfx.drawTextPartial(25, 60, "- Enkoder: Rotace meni mody", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        gfx.drawTextPartial(25, 80, "- Joy stisk: Rychly vyber modu", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        gfx.drawTextPartial(25, 100, "- Potenciometr: Uhel serva", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        gfx.drawTextPartial(25, 120, "- Joystick Y: Kontinualni servo", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        gfx.drawTextPartial(25, 140, "- Dolni tlacitka: Volba pro 7-seg", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        gfx.drawTextPartial(25, 160, "- Horni tlacitko (1s): Rezim spanku", ST77XX_WHITE, ST77XX_BLACK, 1);
-                        
-                        gfx.drawTextPartial(40, 195, "[Stiskni horni tlacitko pro zpet]", ST77XX_GREEN, ST77XX_BLACK, 1);
-                    }
-                }
-                else {
+                {
                     SensorData data = globalState.getSensorData();
 
                     // Statické proměnné pro detekci změn (překreslujeme JEN při reálné změně)
@@ -1401,14 +1535,20 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 50; // 20 fps
                 SensorData data = globalState.getSensorData();
                 static uint8_t lastR = 255, lastG = 255, lastB = 255;
+                static int lastSx = -1, lastSy = -1, lastTx = -1, lastTy = -1;
                 
                 uint8_t r8 = data.colorR > 255 ? (data.colorR >> 8) : data.colorR;
                 uint8_t g8 = data.colorG > 255 ? (data.colorG >> 8) : data.colorG;
                 uint8_t b8 = data.colorB > 255 ? (data.colorB >> 8) : data.colorB;
                 
+                // Umístění kruhu nahoru a bez černé kružnice okolo
+                const int cx = 220, cy = 68, radius = 45;
+                const uint16_t rightPanelBg = 0xDEFB; // Klidné světle šedé pozadí
+
                 // A) STATICKÁ MASKA
                 if (needsFullRedraw) {
                     lastR = 255; lastG = 255; lastB = 255;
+                    lastSx = -1; lastSy = -1; lastTx = -1; lastTy = -1;
 
                     // Levý panel (oranžovo-béžový 0xFED7, přesně 0 až 119 px)
                     gfx.fillRect(0, 0, 120, 240, 0xFED7);
@@ -1425,10 +1565,19 @@ void Task_Display_UI(void *pvParameters) {
                     // Černá předělová a ohraničující čára
                     gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
                     gfx.drawLine(120, 0, 120, 239, ST77XX_BLACK);
+
+                    // Pravý horní panel - podklad pro kruh (Y: 1 až 129)
+                    gfx.fillRect(121, 1, 198, 129, rightPanelBg);
+
+                    // Předělová vodorovná linka mezi kruhem a velkým vzorkem
+                    gfx.drawLine(120, 130, 319, 130, ST77XX_BLACK);
+
+                    // Statický barevný kruh (Color Wheel) posunutý nahoru - BEZ černé obvodové kružnice!
+                    gfx.drawColorWheel(cx, cy, radius, false);
                 }
 
                 // B) DYNAMICKÁ ČÁST
-                if (needsFullRedraw || abs((int)r8 - lastR) > 3 || abs((int)g8 - lastG) > 3 || abs((int)b8 - lastB) > 3) {
+                if (needsFullRedraw || abs((int)r8 - lastR) > 2 || abs((int)g8 - lastG) > 2 || abs((int)b8 - lastB) > 2) {
                     lastR = r8;
                     lastG = g8;
                     lastB = b8;
@@ -1443,37 +1592,47 @@ void Task_Display_UI(void *pvParameters) {
                     gfx.fillRect(36, 182, 82, 22, 0xFED7);
                     gfx.drawTextPartial(38, 185, String(b8), ST77XX_BLACK, 0xFED7, 2);
 
-                    // 2. Barva pozadí pravého panelu (121 až 319 px)
-                    uint16_t bgColor = gfx.color565(r8, g8, b8);
-                    if (r8 == 0 && g8 == 0 && b8 == 0) bgColor = 0xC53F; // Defaultní pastelová fialová
-                    
-                    gfx.fillRect(121, 1, 198, 238, bgColor);
-                    gfx.drawLine(120, 0, 120, 239, ST77XX_BLACK); // Čistá předělová čára
+                    // 2. Velký vzorek detekované barvy přes celou dolní pravou část (od X: 121 do 319, Y: 131 do 238)
+                    uint16_t sampleColor = gfx.color565(r8, g8, b8);
+                    gfx.fillRect(121, 131, 198, 108, sampleColor);
 
-                    // 3. Barevný kruh (Color Wheel) uprostřed pravé části (CX = 220, CY = 120)
-                    int cx = 220, cy = 120, radius = 50;
-                    gfx.drawColorWheel(cx, cy, radius);
-
-                    // 4. Výpočet Hue a šipka ukazatele
+                    // 3. Výpočet Hue a aktualizace šipky (kruh je nahoře stabilní bez blikání)
                     float rf = r8 / 255.0f, gf = g8 / 255.0f, bf = b8 / 255.0f;
                     float maxV = max(rf, max(gf, bf));
                     float minV = min(rf, min(gf, bf));
                     float delta = maxV - minV;
                     float hue = 0.0f;
-                    if (delta > 0.01f) {
+
+                    if (delta > 0.02f) {
                         if (maxV == rf) hue = 60.0f * fmod(((gf - bf) / delta), 6.0f);
                         else if (maxV == gf) hue = 60.0f * (((bf - rf) / delta) + 2.0f);
                         else hue = 60.0f * (((rf - gf) / delta) + 4.0f);
                         if (hue < 0.0f) hue += 360.0f;
                         
-                        // Ručička ukazatele směrem zvenku k dané barvě
                         float hueRad = hue * 0.0174532925f;
                         int tx = cx + (int)(radius * cos(hueRad));
                         int ty = cy + (int)(radius * sin(hueRad));
                         
-                        int sx = cx + (int)((radius + 20) * cos(hueRad));
-                        int sy = cy + (int)((radius + 20) * sin(hueRad));
-                        gfx.drawArrow(sx, sy, tx, ty, 8, ST77XX_BLACK);
+                        int sx = cx + (int)((radius + 16) * cos(hueRad));
+                        int sy = cy + (int)((radius + 16) * sin(hueRad));
+
+                        // Pokud se pozice šipky změnila, smažeme starou a nakreslíme novou
+                        if (lastSx != sx || lastSy != sy || lastTx != tx || lastTy != ty) {
+                            if (lastSx != -1) {
+                                // Smazání staré šipky barvou podkladu
+                                gfx.drawArrow(lastSx, lastSy, lastTx, lastTy, 7, rightPanelBg);
+                            }
+
+                            // Vykreslení nové šipky černou barvou
+                            gfx.drawArrow(sx, sy, tx, ty, 7, ST77XX_BLACK);
+                            lastSx = sx; lastSy = sy; lastTx = tx; lastTy = ty;
+                        }
+                    } else {
+                        // Nízká saturace / černá / bílá -> šipku případně smažeme
+                        if (lastSx != -1) {
+                            gfx.drawArrow(lastSx, lastSy, lastTx, lastTy, 7, rightPanelBg);
+                            lastSx = -1; lastSy = -1; lastTx = -1; lastTy = -1;
+                        }
                     }
                 }
                 break;

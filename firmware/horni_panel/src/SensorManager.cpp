@@ -144,40 +144,14 @@ void SensorManager::readPhotoresistors() {
 #endif
 }
 
-// Tlačítko na horním panelu (detekce krátkého stisku pro info a 1s podržení pro spánek)
-void SensorManager::readTopButton() {
+// Přečtení fyzického pinu horního tlačítka (PIN_BTN1)
+bool SensorManager::readTopButtonRaw() {
 #ifdef ENABLE_BUTTONS
     bool isPressed = (digitalRead(PIN_BTN1) == LOW); // PULLUP -> LOW = stisknuto
     globalState.updateTopButton(isPressed);
-
-    uint32_t now = millis();
-
-    // A) Náběžná hrana stisku (uživatel právě zmáčkl tlačítko)
-    if (isPressed && !lastTopBtnState) {
-        topBtnPressStartTime = now;
-        topBtnLongPressHandled = false;
-    }
-
-    // B) Tlačítko je drženo stisknuté (kontrola 1s na přechod do SLEEP)
-    if (isPressed && !topBtnLongPressHandled) {
-        if (now - topBtnPressStartTime >= 1000) { // 1 sekunda podržení
-            topBtnLongPressHandled = true;
-            Serial.println("[BTN] 1s podrzeni horniho tlacitka -> SLEEP");
-            globalState.setInfoOverlay(false);
-            globalState.setMode(MODE_SLEEP);
-        }
-    }
-
-    // C) Sestupná hrana (uživatel tlačítko pustil)
-    if (!isPressed && lastTopBtnState) {
-        // Pokud to nebyl dlouhý stisk a trval aspoň 50 ms (debounce ochrana)
-        if (!topBtnLongPressHandled && (now - topBtnPressStartTime >= 50)) {
-            Serial.println("[BTN] Kratky stisk horniho tlacitka -> Toggle INFO OVERLAY");
-            globalState.prepniInfoOverlay();
-        }
-    }
-
-    lastTopBtnState = isPressed;
+    return isPressed;
+#else
+    return false;
 #endif
 }
 
@@ -369,7 +343,7 @@ void SensorManager::updateAllSensors() {
     readIRDistance();
     readIRObstacle();
     readPhotoresistors();
-    readTopButton();
+    readTopButtonRaw();
     readColorSensor();
     readIMU();
 }
@@ -390,22 +364,34 @@ void SensorManager::setLeds(bool l1, bool l2, bool l3) {
 
 void SensorManager::setLed1(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(on, current.led_ir, current.led_laser);
+    setLeds(on, current.led_ult, current.led_laser);
 }
 
 void SensorManager::setLed2(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(current.led_ult, on, current.led_laser);
+    setLeds(current.led_ir, on, current.led_laser);
 }
 
 void SensorManager::setLed3(bool on) {
     SensorData current = globalState.getSensorData();
-    setLeds(current.led_ult, current.led_ir, on);
+    setLeds(current.led_ir, current.led_ult, on);
 }
 
 void SensorManager::setColorSensorLed(bool on) {
 #if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
-    digitalWrite(PIN_TCS_LED, on ? HIGH : LOW);
+    // Pokud zapínáme, nastavíme výchozí bezpečný jas (max 180)
+    uint8_t duty = on ? 100 : 0;
+    ledcWrite(LEDC_CHAN_TCS_LED, duty);
+#endif
+}
+
+void SensorManager::setColorSensorLedBrightness(uint8_t brightness) {
+#if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
+    // Bezpečnostní limit: nikdy nepřekročit TCS_LED_MAX_BRIGHT (180)
+    if (brightness > TCS_LED_MAX_BRIGHT) {
+        brightness = TCS_LED_MAX_BRIGHT;
+    }
+    ledcWrite(LEDC_CHAN_TCS_LED, brightness);
 #endif
 }
 
