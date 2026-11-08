@@ -10,8 +10,8 @@ let currentAppMode = 0;     // Číslo aktuálního aktivního režimu na ESP32
 // Názvy jednotlivých módů pro hezké vypsání v záložce Systém
 const modeNames = [
     "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048", "Hra Tetris",
-    "Měření vzdálenosti", "Wi-Fi QR spojení", "Wi-Fi CSI Radar", "Ovládání serv", "Ovládání motoru",
-    "Barevný senzor", "Spánkový režim"
+    "Měření vzdálenosti", "Sledování čáry (IR)", "Wi-Fi QR spojení", "Wi-Fi CSI Radar",
+    "Ovládání serv", "Dokumentace", "Barevný senzor", "Spánkový režim"
 ];
 
 // --- 1. Spuštění při načtení stránky v prohlížeči ---

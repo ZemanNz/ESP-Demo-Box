@@ -282,7 +282,7 @@ void Task_Demo_Autopilot(void *pvParameters) {
             requiredDuration = 25000; // 25 s pro hry
         }
 
-        // 4. Automatické cyklické přepnutí na další mód (všech 12 módů včetně her)
+        // 4. Automatické cyklické přepnutí na další mód (všech 13 módů včetně her)
         if (timeInMode >= requiredDuration) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
@@ -294,11 +294,12 @@ void Task_Demo_Autopilot(void *pvParameters) {
                 case MODE_GAME_FLAPPY:    nextMode = MODE_2048; break;
                 case MODE_2048:           nextMode = MODE_GAME_TETRIS; break;
                 case MODE_GAME_TETRIS:    nextMode = MODE_VZDALENOST; break;
-                case MODE_VZDALENOST:     nextMode = MODE_WIFI_SPOJENI; break;
+                case MODE_VZDALENOST:     nextMode = MODE_CARA; break;
+                case MODE_CARA:           nextMode = MODE_WIFI_SPOJENI; break;
                 case MODE_WIFI_SPOJENI:   nextMode = MODE_WIFI_DETECTION; break;
                 case MODE_WIFI_DETECTION: nextMode = MODE_SERVA; break;
-                case MODE_SERVA:          nextMode = MODE_MOTOR; break;
-                case MODE_MOTOR:          nextMode = MODE_BAREVNY; break;
+                case MODE_SERVA:          nextMode = MODE_DOCS; break;
+                case MODE_DOCS:           nextMode = MODE_BAREVNY; break;
                 case MODE_BAREVNY:        nextMode = MODE_MAIN_MENU; break;
                 default:                  nextMode = MODE_MAIN_MENU; break;
             }
@@ -450,7 +451,7 @@ void Task_Sensors(void *pvParameters) {
     // Prvotní kalibrace gyroskopu po zapnutí
     sensorManager.calibrateIMU();
 
-    // Seznam všech 12 přepínatelných módů (mimo MODE_SLEEP)
+    // Seznam všech 13 přepínatelných módů (mimo MODE_SLEEP)
     static const AppMode kSelectableModes[] = {
         MODE_MAIN_MENU,
         MODE_GYRO,
@@ -459,10 +460,11 @@ void Task_Sensors(void *pvParameters) {
         MODE_2048,
         MODE_GAME_TETRIS,
         MODE_VZDALENOST,
+        MODE_CARA,
         MODE_WIFI_SPOJENI,
         MODE_WIFI_DETECTION,
         MODE_SERVA,
-        MODE_MOTOR,
+        MODE_DOCS,
         MODE_BAREVNY
     };
     static const int kNumSelectableModes = sizeof(kSelectableModes) / sizeof(kSelectableModes[0]);
@@ -805,12 +807,19 @@ void Task_Sensors(void *pvParameters) {
             }
 
             // =======================================================
+            case MODE_CARA: {
+                // V módu čáry běží klasické senzory, ale LED pásek vypneme (řídí si ho MODE_CARA)
+                handleClassicSensors(now, true, false, true);
+                break;
+            }
+
+            // =======================================================
             case MODE_MAIN_MENU:
             case MODE_VZDALENOST:
             case MODE_WIFI_SPOJENI:
             case MODE_WIFI_DETECTION:
             case MODE_SERVA:
-            case MODE_MOTOR:
+            case MODE_DOCS:
             case MODE_BAREVNY:
             default: {
                 // Kompletní obsluha všech klasických periferií:
@@ -895,10 +904,11 @@ void Task_Display_UI(void *pvParameters) {
                     case MODE_2048:           title = "INFO: HRA 2048"; break;
                     case MODE_GAME_TETRIS:    title = "INFO: TETRIS"; break;
                     case MODE_VZDALENOST:     title = "INFO: SENZORY VZDAL."; break;
+                    case MODE_CARA:           title = "INFO: DETEKCE CARY (IR)"; break;
                     case MODE_WIFI_SPOJENI:   title = "INFO: WI-FI SPOJENI"; break;
                     case MODE_WIFI_DETECTION: title = "INFO: WI-FI RADAR CSI"; break;
                     case MODE_SERVA:          title = "INFO: SERVA"; break;
-                    case MODE_MOTOR:          title = "INFO: DC MOTOR"; break;
+                    case MODE_DOCS:           title = "INFO: DOKUMENTACE"; break;
                     case MODE_BAREVNY:        title = "INFO: BAREVNY SENZOR"; break;
                     default: break;
                 }
@@ -1883,201 +1893,217 @@ void Task_Display_UI(void *pvParameters) {
             // =======================================================
             // MÓD: VZDÁLENOSTNÍ SENZORY A GRAFY (ULT, Laser, IR)
             // =======================================================
+            // MÓD: VZDÁLENOSTNÍ SENZORY A GRAFY (IR, ULT, Laser)
+            // Fyzické pořadí zleva doprava: 1. IR (Vlevo), 2. Ultrazvuk (Střed), 3. Laser (Vpravo)
+            // =======================================================
             case MODE_VZDALENOST: {
                 delay = 50; // 20 fps
                 SensorData data = globalState.getSensorData();
                 
+                int irMm    = (int)(data.irDistanceCm * 10.0f);
                 int ultMm   = (int)(data.ultrasonicDistanceCm * 10.0f);
                 int laserMm = (int)data.laserDistanceMm;
-                int irMm    = (int)(data.irDistanceCm * 10.0f);
 
+                static int lastIrMm    = -999;
                 static int lastUltMm   = -999;
                 static int lastLaserMm = -999;
-                static int lastIrMm    = -999;
 
                 // Obsluha tlačítek pro přepínání aktivního senzoru a LED nad senzory:
-                // Tlačítko 1 Vlevo (BTN_DOWN_LEFT)   -> Ultrazvuk LED (D4)
-                // Tlačítko 2 Střed (BTN_DOWN_CENTER) -> Laser LED (D5)
-                // Tlačítko 3 Vpravo (BTN_DOWN_RIGHT) -> IR LED (D1)
+                // Tlačítko 1 Vlevo  (BTN_DOWN_LEFT)   -> IR LED (D1)
+                // Tlačítko 2 Střed  (BTN_DOWN_CENTER) -> Ultrazvuk LED (D4)
+                // Tlačítko 3 Vpravo (BTN_DOWN_RIGHT)  -> Laser LED (D5)
                 if (data.btnDown[BTN_DOWN_LEFT]) {
-                    globalState.updateLeds(true, false, false);
+                    globalState.updateLeds(true, false, false); // IR aktivní
                 } else if (data.btnDown[BTN_DOWN_CENTER]) {
-                    globalState.updateLeds(false, false, true);
+                    globalState.updateLeds(false, true, false); // Ultrazvuk aktivní
                 } else if (data.btnDown[BTN_DOWN_RIGHT]) {
-                    globalState.updateLeds(false, true, false);
+                    globalState.updateLeds(false, false, true); // Laser aktivní
                 }
 
-                static bool last_led_ult   = false;
-                static bool last_led_laser = false;
-                static bool last_led_ir    = false;
+                // Měřítka pro grafy:
+                // IR senzor: max 150 mm (15 cm)
+                // ULT a Laser: max 1500 mm (1.5 m)
+                const int kIrMaxRange = 150;
+                const int kOtherMaxRange = 1500;
 
                 // Historie hodnot pro 5sekundové grafy (25 vzorků po 200 ms = 5.0 s)
+                static int histIr[25]    = {0};
                 static int histUlt[25]   = {0};
                 static int histLaser[25] = {0};
-                static int histIr[25]    = {0};
                 static unsigned long lastGraphSampleTime = 0;
                 static bool graphInitialized = false;
 
-                // A) STATICKÁ MASKA
+                // Barevná paleta pro tmavý moderní dashboard (styl herních módů a čáry)
+                const uint16_t cBgDark      = 0x10A2; // Velmi tmavě modro-šedé pozadí
+                const uint16_t cHeaderBg    = 0x01B2; // Hluboká modrá pro hlavičku
+                const uint16_t cCardBg      = 0x18E5; // Tmavé karty senzorů
+                const uint16_t cBorder      = 0x39E9; // Světlejší rámeček karet
+                const uint16_t cGraphGrid   = 0x2126; // Diskrétní mřížka grafu
+
+                // A) STATICKÁ MASKA (Vykreslí se při přepnutí módu)
                 if (needsFullRedraw) {
+                    lastIrMm    = -999;
                     lastUltMm   = -999;
                     lastLaserMm = -999;
-                    lastIrMm    = -999;
 
                     if (!graphInitialized) {
                         for (int i = 0; i < 25; i++) {
-                            histUlt[i]   = constrain(ultMm, 0, 2000);
-                            histLaser[i] = constrain(laserMm, 0, 1300);
-                            histIr[i]    = constrain(irMm, 0, 300);
+                            histIr[i]    = constrain(irMm, 0, kIrMaxRange);
+                            histUlt[i]   = constrain(ultMm, 0, kOtherMaxRange);
+                            histLaser[i] = constrain(laserMm, 0, kOtherMaxRange);
                         }
                         graphInitialized = true;
                     }
 
-                    // 1. Bílé pozadí celého displeje
-                    gfx.fillRect(0, 0, 320, 240, ST77XX_WHITE);
-                    
-                    // 2. Vycentrované nadpisy sloupců (Velikost 2)
-                    gfx.drawTextPartial(35, 14, "ULT", ST77XX_BLACK, ST77XX_WHITE, 2);
-                    gfx.drawTextPartial(130, 14, "Laser", ST77XX_BLACK, ST77XX_WHITE, 2);
-                    gfx.drawTextPartial(254, 14, "IR", ST77XX_BLACK, ST77XX_WHITE, 2);
+                    // 1. Tmavé pozadí celého displeje
+                    gfx.clearScreen(cBgDark);
 
-                    // 3. Větší ovládací tlačítka (Šedá kolečka R=17) - vycentrované ve spodní části horního panelu
-                    // Col 1: Left (CX=32, CY=102)
-                    gfx.fillCircle(32, 102, 17, 0xCE79);
-                    gfx.drawCircle(32, 102, 17, ST77XX_BLACK);
-                    gfx.drawTextPartial(20, 98, "Left", ST77XX_BLACK, 0xCE79, 1);
+                    // 2. Tři karty pro jednotlivé senzory roztažené odshora (Y: 6 až 108)
+                    // Col 0: IR (X: 4..104, W=101)
+                    // Col 1: ULT (X: 109..210, W=102)
+                    // Col 2: Laser (X: 215..315, W=101)
+                    for (int col = 0; col < 3; col++) {
+                        int cardX = (col == 0) ? 4 : ((col == 1) ? 109 : 215);
+                        int cardW = (col == 1) ? 102 : 101;
+                        
+                        // Karta pro hodnoty (Y: 6, H=98)
+                        gfx.fillRoundRect(cardX, 6, cardW, 98, 5, cCardBg);
+                        gfx.drawRoundRect(cardX, 6, cardW, 98, 5, cBorder);
 
-                    // Col 2: On (CX=139, CY=102)
-                    gfx.fillCircle(139, 102, 17, 0xCE79);
-                    gfx.drawCircle(139, 102, 17, ST77XX_BLACK);
-                    gfx.drawTextPartial(133, 98, "On", ST77XX_BLACK, 0xCE79, 1);
+                        // Karta / rámeček pro graf (Y: 108, H=126)
+                        gfx.fillRoundRect(cardX, 108, cardW, 126, 5, 0x0841);
+                        gfx.drawRoundRect(cardX, 108, cardW, 126, 5, cBorder);
 
-                    // Col 3: Right (CX=245, CY=102)
-                    gfx.fillCircle(245, 102, 17, 0xCE79);
-                    gfx.drawCircle(245, 102, 17, ST77XX_BLACK);
-                    gfx.drawTextPartial(230, 98, "Right", ST77XX_BLACK, 0xCE79, 1);
+                        // Vnitřní mřížka grafu (vodorovné čárkování)
+                        gfx.drawLine(cardX + 2, 142, cardX + cardW - 2, 142, cGraphGrid);
+                        gfx.drawLine(cardX + 2, 178, cardX + cardW - 2, 178, cGraphGrid);
+                    }
 
-                    // 4. Předělové linky (Vodorovná čára posunutá dolů na Y=140 pro větší horní prostor)
-                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
-                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
-                    gfx.drawLine(213, 0, 213, 239, ST77XX_BLACK);
-                    gfx.drawLine(0, 140, 319, 140, ST77XX_BLACK);
+                    // Záhlaví jednotlivých karet nahoře (pouze čisté názvy senzorů IR, ULT, LASER)
+                    // IR karta (Vlevo)
+                    gfx.fillRect(6, 8, 97, 18, 0x5000); // Tmavě červené záhlaví
+                    gfx.drawTextPartial(48, 11, "IR", ST77XX_RED, 0x5000, 1);
+
+                    // ULT karta (Střed)
+                    gfx.fillRect(111, 8, 98, 18, 0x01B0); // Tmavě modré záhlaví
+                    gfx.drawTextPartial(148, 11, "ULT", ST77XX_CYAN, 0x01B0, 1);
+
+                    // Laser karta (Vpravo)
+                    gfx.fillRect(217, 8, 97, 18, 0x5280); // Tmavě oranžové/žluté záhlaví
+                    gfx.drawTextPartial(250, 11, "LASER", ST77XX_YELLOW, 0x5280, 1);
                 }
 
-                // B) DYNAMICKÁ ČÁST - ČÍSLA (Vycentrováno)
-                if (needsFullRedraw || abs(ultMm - lastUltMm) >= 3 || abs(laserMm - lastLaserMm) >= 3 || abs(irMm - lastIrMm) >= 3) {
+                // B) DYNAMICKÁ ČÁST - ČÍSLA A SLOUPOVÉ UKAZATELE (PROGRESS BAR)
+                if (needsFullRedraw || abs(irMm - lastIrMm) >= 2 || abs(ultMm - lastUltMm) >= 3 || abs(laserMm - lastLaserMm) >= 3) {
+                    lastIrMm    = irMm;
                     lastUltMm   = ultMm;
                     lastLaserMm = laserMm;
-                    lastIrMm    = irMm;
 
-                    // Sloupec 1 (ULT mm)
-                    String sUlt = String(ultMm) + " mm";
-                    int wUlt = sUlt.length() * 12;
-                    gfx.fillRect(8, 45, 90, 22, ST77XX_WHITE);
-                    gfx.drawTextPartial(53 - wUlt / 2, 48, sUlt, ST77XX_BLACK, ST77XX_WHITE, 2);
-
-                    // Sloupec 2 (Laser mm)
-                    String sLaser = String(laserMm) + " mm";
-                    int wLaser = sLaser.length() * 12;
-                    gfx.fillRect(115, 45, 90, 22, ST77XX_WHITE);
-                    gfx.drawTextPartial(160 - wLaser / 2, 48, sLaser, ST77XX_BLACK, ST77XX_WHITE, 2);
-
-                    // Sloupec 3 (IR mm)
+                    // Sloupec 1: IR mm
                     String sIr = String(irMm) + " mm";
                     int wIr = sIr.length() * 12;
-                    gfx.fillRect(222, 45, 90, 22, ST77XX_WHITE);
-                    gfx.drawTextPartial(266 - wIr / 2, 48, sIr, ST77XX_BLACK, ST77XX_WHITE, 2);
+                    gfx.fillRect(8, 42, 93, 22, cCardBg);
+                    gfx.drawTextPartial(54 - wIr / 2, 44, sIr, ST77XX_WHITE, cCardBg, 2);
+                    // Mini bar pro IR (0 až 150 mm)
+                    int barIr = map(constrain(irMm, 0, kIrMaxRange), 0, kIrMaxRange, 0, 85);
+                    gfx.fillRect(12, 74, 85, 8, 0x2104);
+                    gfx.fillRect(12, 74, barIr, 8, ST77XX_RED);
+
+                    // Sloupec 2: ULT mm
+                    String sUlt = String(ultMm) + " mm";
+                    int wUlt = sUlt.length() * 12;
+                    gfx.fillRect(113, 42, 94, 22, cCardBg);
+                    gfx.drawTextPartial(160 - wUlt / 2, 44, sUlt, ST77XX_WHITE, cCardBg, 2);
+                    // Mini bar pro ULT (0 až 1500 mm)
+                    int barUlt = map(constrain(ultMm, 0, kOtherMaxRange), 0, kOtherMaxRange, 0, 85);
+                    gfx.fillRect(117, 74, 85, 8, 0x2104);
+                    gfx.fillRect(117, 74, barUlt, 8, ST77XX_CYAN);
+
+                    // Sloupec 3: Laser mm
+                    String sLaser = String(laserMm) + " mm";
+                    int wLaser = sLaser.length() * 12;
+                    gfx.fillRect(219, 42, 93, 22, cCardBg);
+                    gfx.drawTextPartial(265 - wLaser / 2, 44, sLaser, ST77XX_WHITE, cCardBg, 2);
+                    // Mini bar pro Laser (0 až 1500 mm)
+                    int barLaser = map(constrain(laserMm, 0, kOtherMaxRange), 0, kOtherMaxRange, 0, 85);
+                    gfx.fillRect(223, 74, 85, 8, 0x2104);
+                    gfx.fillRect(223, 74, barLaser, 8, ST77XX_YELLOW);
                 }
 
-                // C) DYNAMICKÁ ČÁST - INDIKAČNÍ LED KOLEČKA (Zvětšená R=13, Zelená = aktivní / Červená = neaktivní)
-                if (needsFullRedraw || last_led_ult != data.led_ult || last_led_laser != data.led_laser || last_led_ir != data.led_ir) {
-                    last_led_ult   = data.led_ult;
-                    last_led_laser = data.led_laser;
-                    last_led_ir    = data.led_ir;
-
-                    // Col 1: ULT LED (CX=76, CY=102)
-                    gfx.fillCircle(76, 102, 13, data.led_ult ? 0x07E0 : 0xF800);
-                    gfx.drawCircle(76, 102, 13, ST77XX_BLACK);
-
-                    // Col 2: Laser LED (CX=183, CY=102)
-                    gfx.fillCircle(183, 102, 13, data.led_laser ? 0x07E0 : 0xF800);
-                    gfx.drawCircle(183, 102, 13, ST77XX_BLACK);
-
-                    // Col 3: IR LED (CX=289, CY=102)
-                    gfx.fillCircle(289, 102, 13, data.led_ir ? 0x07E0 : 0xF800);
-                    gfx.drawCircle(289, 102, 13, ST77XX_BLACK);
-                }
-
-                // D) DYNAMICKÁ ČÁST - 5SEKUNDOVÉ KONTINUÁLNÍ GRAFY (100% BEZ PROBLIKÁVÁNÍ)
+                // C) DYNAMICKÁ ČÁST - 5SEKUNDOVÉ KONTINUÁLNÍ GRAFY S PROSTOROVOU VÝPLNÍ
                 unsigned long now = millis();
                 if (needsFullRedraw || (now - lastGraphSampleTime >= 200)) {
                     lastGraphSampleTime = now;
 
                     // Posun vzorků v poli historie
                     for (int i = 0; i < 24; i++) {
+                        histIr[i]    = histIr[i + 1];
                         histUlt[i]   = histUlt[i + 1];
                         histLaser[i] = histLaser[i + 1];
-                        histIr[i]    = histIr[i + 1];
                     }
-                    histUlt[24]   = constrain(ultMm, 0, 2000);   // Max 2.0 m (2000 mm)
-                    histLaser[24] = constrain(laserMm, 0, 1300); // Max 1.3 m (1300 mm)
-                    histIr[24]    = constrain(irMm, 0, 300);     // Max 30 cm (300 mm)
+                    histIr[24]    = constrain(irMm, 0, kIrMaxRange);
+                    histUlt[24]   = constrain(ultMm, 0, kOtherMaxRange);
+                    histLaser[24] = constrain(laserMm, 0, kOtherMaxRange);
 
-                    // Vykreslení grafů (sloupec po sloupci) přímým jednoprůchodovým zápisem sloupců (Zero-flicker)
+                    // Vykreslení grafů zleva doprava (0: IR, 1: ULT, 2: Laser)
                     for (int col = 0; col < 3; col++) {
-                        int xBase = (col == 0) ? 2 : ((col == 1) ? 108 : 215);
-                        int* hData = (col == 0) ? histUlt : ((col == 1) ? histLaser : histIr);
-                        int maxRange = (col == 0) ? 2000 : ((col == 1) ? 1300 : 300); // Specifický rozsah pro každý senzor
-                        uint16_t fillColor = (col == 0) ? 0x9E7F : ((col == 1) ? 0xFFB0 : 0xFD34); // Modrá / Žlutá / Červená výplň
-                        uint16_t lineColor = (col == 0) ? 0x01DF : ((col == 1) ? 0xD2A0 : 0xC800); // Tmavší křivka
+                        int cardX = (col == 0) ? 4 : ((col == 1) ? 109 : 215);
+                        int graphW = (col == 1) ? 96 : 95;
+                        int xBase = cardX + 3;
+                        int maxRange = (col == 0) ? kIrMaxRange : kOtherMaxRange;
+                        int* hData = (col == 0) ? histIr : ((col == 1) ? histUlt : histLaser);
+                        
+                        // Barvy grafů v tmavém stylu:
+                        uint16_t fillColor = (col == 0) ? 0x4800 : ((col == 1) ? 0x0210 : 0x5280);
+                        uint16_t lineColor = (col == 0) ? ST77XX_RED : ((col == 1) ? ST77XX_CYAN : ST77XX_YELLOW);
+                        const int yGraphBottom = 228;
+                        const int yGraphTop = 114;
+                        const int yGraphH = yGraphBottom - yGraphTop; // 114 px výška
 
                         for (int i = 0; i < 24; i++) {
-                            int x1 = xBase + (i * 102) / 24;
-                            int x2 = xBase + ((i + 1) * 102) / 24;
-                            int y1 = 236 - map(hData[i], 0, maxRange, 0, 88);
-                            int y2 = 236 - map(hData[i + 1], 0, maxRange, 0, 88);
-                            y1 = constrain(y1, 148, 236);
-                            y2 = constrain(y2, 148, 236);
+                            int x1 = xBase + (i * graphW) / 24;
+                            int x2 = xBase + ((i + 1) * graphW) / 24;
+                            int y1 = yGraphBottom - map(hData[i], 0, maxRange, 0, yGraphH);
+                            int y2 = yGraphBottom - map(hData[i + 1], 0, maxRange, 0, yGraphH);
+                            y1 = constrain(y1, yGraphTop, yGraphBottom);
+                            y2 = constrain(y2, yGraphTop, yGraphBottom);
 
                             for (int px = x1; px <= x2; px++) {
                                 int py = y1 + (y2 - y1) * (px - x1) / (x2 - x1);
-                                py = constrain(py, 148, 236);
+                                py = constrain(py, yGraphTop, yGraphBottom);
 
-                                // 1. Bílé pozadí nad křivkou (okamžitý přepis beze zbytku a bez blikání)
-                                if (py > 142) {
-                                    gfx.drawLine(px, 142, px, py - 1, ST77XX_WHITE);
+                                // 1. Tmavé pozadí nad křivkou (vnitřek grafu)
+                                if (py > yGraphTop) {
+                                    gfx.drawLine(px, yGraphTop, px, py - 1, 0x0841);
                                 }
-                                // 2. Tmavá křivka
-                                gfx.drawLine(px, py, px, min(py + 1, 236), lineColor);
+                                // 2. Zvýrazněná křivka grafu
+                                gfx.drawLine(px, py, px, min(py + 1, yGraphBottom), lineColor);
                                 // 3. Barevná výplň pod křivkou
-                                if (py + 2 <= 237) {
-                                    gfx.drawLine(px, py + 2, px, 237, fillColor);
+                                if (py + 2 <= yGraphBottom) {
+                                    gfx.drawLine(px, py + 2, px, yGraphBottom, fillColor);
                                 }
                             }
                         }
 
-                        // Postranní orientační značky vzdálenosti uvnitř grafu odpovídající reálným rozsahům
+                        // Jemná mřížka
+                        gfx.drawLine(xBase, 142, xBase + graphW - 1, 142, cGraphGrid);
+                        gfx.drawLine(xBase, 178, xBase + graphW - 1, 178, cGraphGrid);
+
+                        // Popisky hodnot přímo u os grafu (na levém okraji)
                         if (col == 0) {
-                            gfx.drawTextPartial(xBase + 3, 144, "2m", 0x7BEF, ST77XX_WHITE, 1);
-                            gfx.drawTextPartial(xBase + 3, 188, "1m", 0x7BEF, ST77XX_WHITE, 1);
-                        } else if (col == 1) {
-                            gfx.drawTextPartial(xBase + 3, 144, "1.3m", 0x7BEF, ST77XX_WHITE, 1);
-                            gfx.drawTextPartial(xBase + 3, 188, "0.6m", 0x7BEF, ST77XX_WHITE, 1);
+                            gfx.drawTextPartial(cardX + 4, 114, "15cm", 0xCE79, 0x0841, 1);
+                            gfx.drawTextPartial(cardX + 4, 144, "10cm", 0x7BEF, 0x0841, 1);
+                            gfx.drawTextPartial(cardX + 4, 180, "5cm", 0x7BEF, 0x0841, 1);
                         } else {
-                            gfx.drawTextPartial(xBase + 3, 144, "30cm", 0x7BEF, ST77XX_WHITE, 1);
-                            gfx.drawTextPartial(xBase + 3, 188, "15cm", 0x7BEF, ST77XX_WHITE, 1);
+                            gfx.drawTextPartial(cardX + 4, 114, "1.5m", 0xCE79, 0x0841, 1);
+                            gfx.drawTextPartial(cardX + 4, 144, "1.0m", 0x7BEF, 0x0841, 1);
+                            gfx.drawTextPartial(cardX + 4, 180, "0.5m", 0x7BEF, 0x0841, 1);
                         }
 
-                        // Časové značky "0s" a "5s" přímo v grafu (šetří místo a neblikají)
-                        gfx.drawTextPartial(xBase + 4, 227, "0s", ST77XX_BLACK, fillColor, 1);
-                        gfx.drawTextPartial(xBase + 88, 227, "5s", ST77XX_BLACK, fillColor, 1);
+                        // Časové značky "0s" a "5s" v dolní liště grafu
+                        gfx.drawTextPartial(cardX + 5, 222, "0s", 0xAD55, fillColor, 1);
+                        gfx.drawTextPartial(cardX + graphW - 14, 222, "5s", 0xAD55, fillColor, 1);
                     }
-
-                    // Obnova oddělovacích a ohraničujících linek
-                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
-                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
-                    gfx.drawLine(213, 0, 213, 239, ST77XX_BLACK);
-                    gfx.drawLine(0, 140, 319, 140, ST77XX_BLACK);
                 }
                 break;
             }
@@ -2304,21 +2330,538 @@ void Task_Display_UI(void *pvParameters) {
             }
 
             // =======================================================
-            case MODE_SERVA: {
-                delay = 50;
-                if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(115, 100, "SERVA", ST77XX_WHITE, ST77XX_BLACK, 3);
+            case MODE_CARA: {
+                delay = 40;
+                SensorData data = globalState.getSensorData();
+                static int lastSurfaceState = -1; // -1: neznámo, 0: černá, 1: bílá
+                static bool caraInitialized = false;
+
+                // Odrazový IR senzor (IR2 - TCRT5000 na GPIO 38):
+                // Podle zapojení / trimru:
+                // Černá (absorpce) -> LOW  (data.irObstacle == true)
+                // Bílá  (odraz)    -> HIGH (data.irObstacle == false)
+                bool isWhiteSurface = !data.irObstacle;
+                int currentSurface = isWhiteSurface ? 1 : 0;
+
+                // 1. STATICKÁ MASKA (vykreslí se jednou)
+                if (needsFullRedraw || !caraInitialized) {
+                    caraInitialized = true;
+                    lastSurfaceState = -1;
+                    gfx.clearScreen(0x18E3); // Tmavé břidlicové pozadí
+
+                    // Horní hlavička
+                    gfx.fillRect(0, 0, 320, 32, 0x0A24);
+                    gfx.drawTextPartial(40, 8, "SENZOR SLEDOVANI CARY", ST77XX_WHITE, 0x0A24, 2);
+                    gfx.drawLine(0, 32, 319, 32, ST77XX_CYAN);
+
+                    // --- VYKRESLENÍ MODULU SENZORU TCRT5000 ---
+                    // Modrá deska plošného spoje senzoru (PCB)
+                    gfx.fillRoundRect(110, 42, 100, 68, 6, 0x01B3);
+                    gfx.drawRoundRect(110, 42, 100, 68, 6, ST77XX_WHITE);
+                    gfx.drawTextPartial(125, 46, "TCRT5000", ST77XX_YELLOW, 0x01B3, 1);
+
+                    // Dvě optické čočky senzoru: Vysílač (IR LED - tmavě modrá/černá) a Přijímač (Fototranzistor - černá)
+                    gfx.fillCircle(138, 80, 14, 0x2124);
+                    gfx.drawCircle(138, 80, 14, ST77XX_WHITE);
+                    gfx.fillCircle(138, 80, 8, 0x4215);
+
+                    gfx.fillCircle(182, 80, 14, 0x0841);
+                    gfx.drawCircle(182, 80, 14, ST77XX_WHITE);
+                    gfx.fillCircle(182, 80, 8, 0x18C3);
+
+                    // Vývody / piny modulu nahoře
+                    gfx.fillRect(145, 36, 6, 6, 0xC618);
+                    gfx.fillRect(157, 36, 6, 6, 0xC618);
+                    gfx.fillRect(169, 36, 6, 6, 0xC618);
+
+                    // Ohraničení podkladu dráhy (Y: 135 až 195)
+                    gfx.drawRoundRect(18, 134, 284, 52, 6, 0x632C);
+
+                    // Spodní diagnostika
+                    gfx.drawTextPartial(25, 202, "GPIO 38 (IR2)", 0x8410, 0x18E3, 1);
+                    gfx.drawTextPartial(25, 218, "Cerna = Absorpce (LOW)", 0xAD55, 0x18E3, 1);
+                    gfx.drawTextPartial(170, 218, "Bila = Odraz (HIGH)", 0xAD55, 0x18E3, 1);
+                }
+
+                // 2. DYNAMICKÉ PŘEKRESLENÍ PŘI ZMĚNĚ POVRCHU
+                if (needsFullRedraw || currentSurface != lastSurfaceState) {
+                    lastSurfaceState = currentSurface;
+
+                    if (isWhiteSurface) {
+                        // --- BÍLÝ POVRCH (Plný odraz světla) ---
+                        // Podklad pod senzorem je bílá plocha
+                        gfx.fillRoundRect(20, 136, 280, 48, 5, ST77XX_WHITE);
+                        // Kontrastní zelený nápis
+                        gfx.drawTextPartial(48, 148, "BILY POVRCH [ODRAZ]", 0x03E0, ST77XX_WHITE, 2);
+
+                        // Infračervené paprsky odražené zpět do senzoru (zelené šipky / paprsky)
+                        gfx.drawLine(138, 96, 138, 134, ST77XX_GREEN);
+                        gfx.drawLine(182, 96, 182, 134, ST77XX_GREEN);
+                        gfx.fillTriangle(138, 96, 134, 106, 142, 106, ST77XX_GREEN);
+                        gfx.fillTriangle(182, 96, 178, 106, 186, 106, ST77XX_GREEN);
+
+                        // Indikační stavová LEDka na desce senzoru (rozsvícená zelená)
+                        gfx.fillCircle(160, 64, 5, ST77XX_GREEN);
+                        gfx.drawCircle(160, 64, 5, ST77XX_WHITE);
+
+                        // Horní LED pásek svítí čistě bíle (plný odraz, jemná poloviční intenzita)
+                        sensorManager.setLedStripColor(0xFFFFFF, 18);
+                    } else {
+                        // --- ČERNÁ ČÁRA (Světlo je pohlceno) ---
+                        // Podklad pod senzorem je černá čára
+                        gfx.fillRoundRect(20, 136, 280, 48, 5, ST77XX_BLACK);
+                        // Výstražný červený nápis
+                        gfx.drawTextPartial(45, 148, "CERNA CARA [POHLCA]", ST77XX_RED, ST77XX_BLACK, 2);
+
+                        // Paprsky zmizely v černé (pohlceno) - přebarvíme na barvu pozadí
+                        gfx.fillRect(132, 96, 14, 39, 0x18E3);
+                        gfx.fillRect(176, 96, 14, 39, 0x18E3);
+                        // Jen slabý vysílaný červený paprsek dolů
+                        gfx.drawLine(138, 96, 138, 120, ST77XX_RED);
+                        gfx.fillTriangle(138, 120, 134, 112, 142, 112, ST77XX_RED);
+
+                        // Indikační stavová LEDka zhasnutá (tmavá)
+                        gfx.fillCircle(160, 64, 5, 0x2104);
+                        gfx.drawCircle(160, 64, 5, 0x632C);
+
+                        // Horní LED pásek zhasne (černá)
+                        uint32_t offStrip[8] = {0};
+                        sensorManager.setLedStrip(offStrip, 0);
+                    }
                 }
                 break;
             }
 
             // =======================================================
-            case MODE_MOTOR: {
-                delay = 50;
+            // MÓD: ROBOTICKÁ PAŽE / SERVA (3D Industriální robot podle předlohy)
+            // Základna (0..172°): Řízena potenciometrem i joystickem X / tlačítky doleva/doprava
+            // Zdvih ramene (15..75°): 1 plynulý kloub řízený joystickem Y / tlačítky nahoru/dolů
+            // Nástroj (Chytré servo LX-16A): Přepínač Switch 2 nebo stisk joysticku (SW)
+            // =======================================================
+            case MODE_SERVA: {
+                delay = 30; // ~33 fps plynulý běh
+                SensorData data = globalState.getSensorData();
+
+                static float currentArmAngleDeg = 45.0f; // Výška ramene (15° až 75°)
+                static float currentBaseAngleDeg = 86.0f; // Úhel základny (0° až 172°)
+                static int lastPotRaw = -999;
+                static int lastBaseDeg = -999;
+                static int lastArmDeg = -999;
+                static int lastGripperDeg = -999;
+
+                // 1. Čtení a mapování vstupů:
+                // Potenciometr: 0 = vlevo (0°), 4095 = vpravo (172°)
+                int potRaw = constrain((int)data.potentiometer, 0, 4095);
+                if (lastPotRaw == -999) {
+                    lastPotRaw = potRaw;
+                    currentBaseAngleDeg = map(potRaw, 0, 4095, 0, 172);
+                } else if (abs(potRaw - lastPotRaw) > 25) {
+                    lastPotRaw = potRaw;
+                    currentBaseAngleDeg = map(potRaw, 0, 4095, 0, 172);
+                }
+
+                // Joystick X a tlačítka doleva/doprava: otáčení základny
+                if (data.joyX < 1500) {
+                    float spd = map(1500 - data.joyX, 0, 1500, 1, 5);
+                    currentBaseAngleDeg -= spd;
+                } else if (data.joyX > 2500) {
+                    float spd = map(data.joyX - 2500, 0, 1595, 1, 5);
+                    currentBaseAngleDeg += spd;
+                }
+                if (data.btnDown[BTN_DOWN_LEFT]) currentBaseAngleDeg -= 2.5f;
+                if (data.btnDown[BTN_DOWN_RIGHT]) currentBaseAngleDeg += 2.5f;
+                currentBaseAngleDeg = constrain(currentBaseAngleDeg, 0.0f, 172.0f);
+                int baseAngleDeg = (int)currentBaseAngleDeg;
+
+                // Joystick Y a tlačítka nahoru/dolů: zdvih ramene (1 kloub)
+                if (data.joyY < 1500) {
+                    float step = map(1500 - data.joyY, 0, 1500, 1, 4);
+                    currentArmAngleDeg += step;
+                } else if (data.joyY > 2500) {
+                    float step = map(data.joyY - 2500, 0, 1595, 1, 4);
+                    currentArmAngleDeg -= step;
+                }
+                if (data.btnDown[BTN_DOWN_UP]) currentArmAngleDeg += 2.5f;
+                if (data.btnDown[BTN_DOWN_DOWN]) currentArmAngleDeg -= 2.5f;
+                currentArmAngleDeg = constrain(currentArmAngleDeg, 15.0f, 75.0f);
+                int armDegInt = (int)currentArmAngleDeg;
+
+                // Nástroj / klepeto (chytré servo LX-16A):
+                bool isToolActive = data.switch2 || data.joyBtn;
+                int gripperAngleDeg = isToolActive ? 70 : 0;
+
+                // Barevná paleta vycházející z referenčního obrázku:
+                const uint16_t cBg          = 0x0842; // Tmavý břidlicový grafit (pro čistý kontrast)
+                const uint16_t cGrid        = 0x18E5; // Perspektivní rastr podlahy
+                const uint16_t cPanelBg     = 0x10A3; // Podklad karet
+                const uint16_t cPanelBorder = 0x2967; // Rámečky karet
+
+                // Barvy dílů robotické paže z předlohy:
+                const uint16_t cCobotBlue   = 0x4CEE; // Svěží průmyslová modrá z obrázku
+                const uint16_t cCobotLight  = 0x7E3F; // Odlesk hrany nosníku
+                const uint16_t cCobotDark   = 0x1972; // Zastíněná 3D bočnice
+                const uint16_t cJointOrange = 0xFD00; // Výrazný zlatavě oranžový střed kloubů a čelistí klepeta
+                const uint16_t cTurretWhite = ST77XX_WHITE; // Bílý obloukový stojan
+
+                // 2. STATICKÁ MASKA (Vykreslí se při přepnutí módu)
                 if (needsFullRedraw) {
-                    gfx.clearScreen(ST77XX_BLACK);
-                    gfx.drawTextPartial(115, 100, "MOTOR", ST77XX_WHITE, ST77XX_BLACK, 3);
+                    lastBaseDeg = -999;
+                    lastArmDeg = -999;
+                    lastGripperDeg = -999;
+
+                    gfx.clearScreen(cBg);
+
+                    // Dělící linka nad kartami
+                    gfx.drawLine(0, 194, 319, 194, cPanelBorder);
+
+                    // 3 spodní přehledné karty stavu (Y: 196 až 238, výška 42 px)
+                    // Karta 0: ZÁKLADNA / MG996R
+                    gfx.fillRoundRect(6, 196, 98, 41, 4, cPanelBg);
+                    gfx.drawRoundRect(6, 196, 98, 41, 4, cPanelBorder);
+                    gfx.drawTextPartial(31, 199, "ZAKLADNA", ST77XX_CYAN, cPanelBg, 1);
+
+                    // Karta 1: RAMENO [JOY]
+                    gfx.fillRoundRect(111, 196, 98, 41, 4, cPanelBg);
+                    gfx.drawRoundRect(111, 196, 98, 41, 4, cPanelBorder);
+                    gfx.drawTextPartial(124, 199, "RAMENO [JOY]", ST77XX_YELLOW, cPanelBg, 1);
+
+                    // Karta 2: NÁSTROJ [SW2]
+                    gfx.fillRoundRect(216, 196, 100, 41, 4, cPanelBg);
+                    gfx.drawRoundRect(216, 196, 100, 41, 4, cPanelBorder);
+                    gfx.drawTextPartial(227, 199, "KLEPETO [SW2]", 0xFD20, cPanelBg, 1);
+                }
+
+                // 3. DYNAMICKÉ PŘEKRESLENÍ MODELU RAMENE
+                if (needsFullRedraw || abs(baseAngleDeg - lastBaseDeg) >= 2 || abs(armDegInt - lastArmDeg) >= 1 || gripperAngleDeg != lastGripperDeg) {
+                    lastBaseDeg = baseAngleDeg;
+                    lastArmDeg = armDegInt;
+                    lastGripperDeg = gripperAngleDeg;
+
+                    // 1. Přesné vycentrování textových hodnot na spodních kartách
+                    String sBase = String(baseAngleDeg) + " deg";
+                    gfx.fillRect(8, 212, 94, 22, cPanelBg);
+                    int xBase = 55 - (sBase.length() * 12) / 2;
+                    gfx.drawTextPartial(xBase, 215, sBase, ST77XX_WHITE, cPanelBg, 2);
+
+                    String sArm = String(armDegInt) + " deg";
+                    gfx.fillRect(113, 212, 94, 22, cPanelBg);
+                    int xArm = 160 - (sArm.length() * 12) / 2;
+                    gfx.drawTextPartial(xArm, 215, sArm, ST77XX_WHITE, cPanelBg, 2);
+
+                    gfx.fillRect(218, 212, 96, 22, cPanelBg);
+                    if (isToolActive) {
+                        gfx.drawTextPartial(225, 215, "SEVRENO", ST77XX_GREEN, cPanelBg, 2);
+                    } else {
+                        gfx.drawTextPartial(219, 215, "OTEVRENO", 0x7BEF, cPanelBg, 2);
+                    }
+
+                    // 2. Smazání výhradně pracovní plochy pro 3D model (Y: 0 až 193)
+                    gfx.fillRect(0, 0, 320, 194, cBg);
+
+                    // Perspektivní podlaha (industriální dílna)
+                    for (int x = 20; x <= 300; x += 40) {
+                        gfx.drawLine(x, 145, 160 + (x - 160) * 1.35f, 190, cGrid);
+                    }
+                    gfx.drawLine(20, 145, 300, 145, cGrid);
+                    gfx.drawLine(10, 165, 310, 165, cGrid);
+                    gfx.drawLine(0, 190, 319, 190, cGrid);
+
+                    // =========================================================
+                    // 3D KINEMATIKA & PROJEKCE JEDNOKLOUBOVÉHO RAMENE S HLAVICÍ
+                    // =========================================================
+                    const int bx = 160;
+                    const int by = 165;
+
+                    // Úhel natočení základny (-60° až +60°)
+                    float phi = ((float)baseAngleDeg - 86.0f) * 0.012f;
+                    // Úhel zdvihu jediného hlavního ramene (15° až 75°)
+                    float armRad = (float)currentArmAngleDeg * 0.0174533f;
+
+                    // Délka ramene
+                    const float L1 = 80.0f;
+
+                    // Kloub 0 (Rameno na vrchu bílého stojanu)
+                    int j0x = bx;
+                    int j0y = by - 36; // 129
+
+                    // Poloha kloubu 1 (Zápěstí / uchycení nástroje)
+                    float r = L1 * cosf(armRad);
+                    float h = L1 * sinf(armRad);
+                    int j1x = j0x + (int)(r * sinf(phi) * 1.35f);
+                    int j1y = j0y - (int)h + (int)(r * cosf(phi) * 0.38f);
+
+                    // 1. DYNAMICKÝ VRŽENÝ STÍN NA PODLAHU (zůstává striktně na podlaze, nikdy nepřekryje karty)
+                    int s1x = bx + (int)(r * sinf(phi) * 1.35f);
+                    int s1y = constrain(by + (int)(r * cosf(phi) * 0.38f), 145, 189);
+                    gfx.drawLine(bx, by, s1x, s1y, 0x0000);
+                    gfx.fillCircle(s1x, s1y, 3, 0x0000);
+
+                    // 2. PODSTAVEC (Modrý blok s černým obrysem podle obrázku)
+                    gfx.fillRoundRect(bx - 36, by - 4, 72, 14, 4, cCobotDark);
+                    gfx.drawRoundRect(bx - 36, by - 4, 72, 14, 4, ST77XX_BLACK);
+                    gfx.fillRoundRect(bx - 36, by - 8, 72, 12, 4, cCobotBlue);
+                    gfx.drawRoundRect(bx - 36, by - 8, 72, 12, 4, ST77XX_BLACK);
+                    gfx.fillRect(bx - 32, by - 6, 64, 2, cCobotLight);
+
+                    // 3. BÍLÝ OBLOUKOVÝ STOJAN (Arch Pedestal z obrázku)
+                    // 3D stínová hrana vpravo
+                    gfx.fillRoundRect(j0x - 17 + 3, j0y - 17 + 2, 34, by - j0y + 15, 17, 0x5ACB);
+                    // Hlavní bílé tělo s obloukem nahoře
+                    gfx.fillRoundRect(j0x - 17, j0y - 17, 34, by - j0y + 15, 17, cTurretWhite);
+                    gfx.drawRoundRect(j0x - 17, j0y - 17, 34, by - j0y + 15, 17, ST77XX_BLACK);
+
+                    // Ložiskový kroužek uprostřed stojanu (z obrázku)
+                    gfx.fillCircle(j0x, j0y + 14, 9, cCobotBlue);
+                    gfx.drawCircle(j0x, j0y + 14, 9, ST77XX_BLACK);
+                    gfx.fillCircle(j0x, j0y + 14, 4, 0x18C3);
+                    gfx.drawCircle(j0x, j0y + 14, 4, ST77XX_BLACK);
+
+                    // Pomocná lambda pro vykreslení 3D masivního nosníku
+                    auto drawBeam = [&](int x0, int y0, int x1, int y1, int width, int depth, uint16_t topCol, uint16_t sideCol) {
+                        float dx = (float)(x1 - x0);
+                        float dy = (float)(y1 - y0);
+                        float len = sqrtf(dx * dx + dy * dy);
+                        if (len < 1.0f) return;
+                        float nx = -dy / len * (width * 0.5f);
+                        float ny =  dx / len * (width * 0.5f);
+
+                        int t1x = (int)(x0 + nx), t1y = (int)(y0 + ny);
+                        int t2x = (int)(x0 - nx), t2y = (int)(y0 - ny);
+                        int t3x = (int)(x1 - nx), t3y = (int)(y1 - ny);
+                        int t4x = (int)(x1 + nx), t4y = (int)(y1 + ny);
+
+                        if (depth > 0) {
+                            int b2x = t2x, b2y = t2y + depth;
+                            int b3x = t3x, b3y = t3y + depth;
+                            gfx.fillTriangle(t2x, t2y, b2x, b2y, b3x, b3y, sideCol);
+                            gfx.fillTriangle(t2x, t2y, b3x, b3y, t3x, t3y, sideCol);
+                            gfx.drawLine(b2x, b2y, b3x, b3y, ST77XX_BLACK);
+                            gfx.drawLine(t2x, t2y, b2x, b2y, ST77XX_BLACK);
+                            gfx.drawLine(t3x, t3y, b3x, b3y, ST77XX_BLACK);
+                        }
+                        gfx.fillTriangle(t1x, t1y, t2x, t2y, t3x, t3y, topCol);
+                        gfx.fillTriangle(t1x, t1y, t3x, t3y, t4x, t4y, topCol);
+                        gfx.drawLine(t1x, t1y, t2x, t2y, ST77XX_BLACK);
+                        gfx.drawLine(t2x, t2y, t3x, t3y, ST77XX_BLACK);
+                        gfx.drawLine(t3x, t3y, t4x, t4y, ST77XX_BLACK);
+                        gfx.drawLine(t4x, t4y, t1x, t1y, ST77XX_BLACK);
+                    };
+
+                    // Pomocná lambda pro vykreslení 3D válcového kloubu (KUKA/Cobot joint)
+                    auto drawJoint = [&](int cx, int cy, int radius, int depth, uint16_t outerCol, uint16_t innerCol) {
+                        if (depth > 0) {
+                            gfx.fillCircle(cx + 2, cy + depth, radius, cCobotDark);
+                            gfx.drawCircle(cx + 2, cy + depth, radius, ST77XX_BLACK);
+                            gfx.fillRect(cx - radius, cy, radius * 2 + 1, depth, cCobotDark);
+                            gfx.drawLine(cx - radius, cy, cx - radius, cy + depth, ST77XX_BLACK);
+                            gfx.drawLine(cx + radius + 1, cy, cx + radius + 1, cy + depth, ST77XX_BLACK);
+                        }
+                        gfx.fillCircle(cx, cy, radius, outerCol);
+                        gfx.drawCircle(cx, cy, radius, ST77XX_BLACK);
+
+                        int innerR = (int)(radius * 0.52f);
+                        if (innerR >= 3) {
+                            gfx.fillCircle(cx, cy, innerR, innerCol);
+                            gfx.drawCircle(cx, cy, innerR, ST77XX_BLACK);
+                            gfx.fillCircle(cx, cy, 2, ST77XX_BLACK);
+                        }
+                    };
+
+                    // 4. HLAVNÍ NOSNÍK RAMENE (Modrý masivní profil s bílým jádrem z předlohy)
+                    drawBeam(j0x, j0y, j1x, j1y, 16, 4, cCobotBlue, cCobotDark);
+                    // Bílý středový kanál z referenčního obrázku
+                    drawBeam(j0x, j0y, j1x, j1y, 6, 0, ST77XX_WHITE, ST77XX_WHITE);
+                    // Odlesk horní hrany
+                    gfx.drawLine((j0x * 3 + j1x) / 4, (j0y * 3 + j1y) / 4, (j0x + j1x * 3) / 4, (j0y + j1y * 3) / 4, cCobotLight);
+
+                    // 5. KLOUB 0 (Ramenní kloub - modrý kotouč s oranžovým středem)
+                    drawJoint(j0x, j0y, 13, 3, cCobotBlue, cJointOrange);
+
+                    // 6. KLOUB 1 (Zápěstní kloub na konci nosníku)
+                    drawJoint(j1x, j1y, 14, 3, cCobotBlue, cJointOrange);
+
+                    // 7. MECHANICKÉ KLEPETO (Dvě oranžové čelisti / páčky podle přání uživatele)
+                    float bdx = (float)(j1x - j0x);
+                    float bdy = (float)(j1y - j0y);
+                    float blen = sqrtf(bdx * bdx + bdy * bdy);
+                    if (blen < 1.0f) blen = 1.0f;
+                    float bux = bdx / blen;
+                    float buy = bdy / blen;
+                    float bnx = -buy;
+                    float bny = bux;
+
+                    // Přirozený sklon klepeta mírně vpřed/dolů (~25°)
+                    const float toolTilt = 0.44f;
+                    float tux = bux * cosf(toolTilt) + bnx * sinf(toolTilt);
+                    float tuy = buy * cosf(toolTilt) + bny * sinf(toolTilt);
+                    float tnx = -tuy;
+                    float tny = tux;
+
+                    // Základna a tělo serva klepeta (uchycené na kloubu J1)
+                    int palmX = j1x + (int)(tux * 9);
+                    int palmY = j1y + (int)(tuy * 9);
+                    drawBeam(j1x, j1y, palmX, palmY, 10, 2, cCobotBlue, cCobotDark);
+
+                    // Příčný montážní blok klepeta (pouzdro serva LX-16A)
+                    int pm1x = (int)(palmX - tnx * 8);
+                    int pm1y = (int)(palmY - tny * 8);
+                    int pm2x = (int)(palmX + tnx * 8);
+                    int pm2y = (int)(palmY + tny * 8);
+                    int pm3x = (int)(pm2x + tux * 5);
+                    int pm3y = (int)(pm2y + tuy * 5);
+                    int pm4x = (int)(pm1x + tux * 5);
+                    int pm4y = (int)(pm1y + tuy * 5);
+
+                    gfx.fillTriangle(pm1x, pm1y, pm2x, pm2y, pm3x, pm3y, 0x2124);
+                    gfx.fillTriangle(pm1x, pm1y, pm3x, pm3y, pm4x, pm4y, 0x2124);
+                    gfx.drawLine(pm1x, pm1y, pm2x, pm2y, ST77XX_BLACK);
+                    gfx.drawLine(pm2x, pm2y, pm3x, pm3y, ST77XX_BLACK);
+                    gfx.drawLine(pm3x, pm3y, pm4x, pm4y, ST77XX_BLACK);
+                    gfx.drawLine(pm4x, pm4y, pm1x, pm1y, ST77XX_BLACK);
+
+                    // Čepy obou čelistí
+                    int p1x = (int)(palmX - tnx * 6 + tux * 4);
+                    int p1y = (int)(palmY - tny * 6 + tuy * 4);
+                    int p2x = (int)(palmX + tnx * 6 + tux * 4);
+                    int p2y = (int)(palmY + tny * 6 + tuy * 4);
+
+                    // Geometrie obou oranžových čelistí
+                    const float fingerLen = 20.0f;
+                    const uint16_t cJawOrange = 0xFD00; // Výrazná oranžová
+                    const uint16_t cJawLight  = 0xFFE0; // Žlutý odlesk hrany
+                    const uint16_t cJawDark   = 0xA280; // Tmavě jantarový stín
+
+                    float l_fx, l_fy, r_fx, r_fy;
+                    if (isToolActive) {
+                        // SEVŘENO: Čelisti jsou rovnoběžné a pevně svírají kostku
+                        float ang = 0.05f;
+                        l_fx = tux * cosf(-ang) - tnx * sinf(-ang);
+                        l_fy = tuy * cosf(-ang) - tny * sinf(-ang);
+                        r_fx = tux * cosf(ang) + tnx * sinf(ang);
+                        r_fy = tuy * cosf(ang) + tny * sinf(ang);
+                    } else {
+                        // OTEVŘENO: Čelisti jsou rozevřené do V (~28°)
+                        float ang = 0.48f;
+                        l_fx = tux * cosf(ang) - tnx * sinf(ang);
+                        l_fy = tuy * cosf(ang) - tny * sinf(ang);
+                        r_fx = tux * cosf(ang) + tnx * sinf(ang);
+                        r_fy = tuy * cosf(ang) + tny * sinf(ang);
+                    }
+
+                    int tip1_x = p1x + (int)(l_fx * fingerLen);
+                    int tip1_y = p1y + (int)(l_fy * fingerLen);
+                    int tip2_x = p2x + (int)(r_fx * fingerLen);
+                    int tip2_y = p2y + (int)(r_fy * fingerLen);
+
+                    // Zahnuté špičky klepet směřující dovnitř
+                    int hook1_x = tip1_x + (int)(tnx * 4);
+                    int hook1_y = tip1_y + (int)(tny * 4);
+                    int hook2_x = tip2_x - (int)(tnx * 4);
+                    int hook2_y = tip2_y - (int)(tny * 4);
+
+                    // 8. TECHNOLOGICKÁ KOSTKA (Pokud jsou klepeta sevřená, sedí přesně v nich)
+                    if (isToolActive) {
+                        int cubeX = palmX + (int)(tux * 14);
+                        int cubeY = palmY + (int)(tuy * 14);
+
+                        // 3D Technologická kostka s modro-azurovým tělem a bílým technologickým symbolem
+                        gfx.fillRoundRect(cubeX - 6, cubeY - 6, 13, 13, 2, 0x05BF);
+                        gfx.fillRect(cubeX - 5, cubeY - 5, 11, 4, 0x6E7F);
+                        gfx.drawRoundRect(cubeX - 6, cubeY - 6, 13, 13, 2, ST77XX_WHITE);
+                        gfx.drawRoundRect(cubeX - 7, cubeY - 7, 15, 15, 3, ST77XX_BLACK);
+                        gfx.drawLine(cubeX - 3, cubeY, cubeX + 3, cubeY, ST77XX_WHITE);
+                        gfx.drawLine(cubeX, cubeY - 3, cubeX, cubeY + 3, ST77XX_WHITE);
+                    }
+
+                    // Vykreslení obou oranžových ramen klepeta (překrývají boky kostky, takže kostka reálně sedí uvnitř)
+                    drawBeam(p1x, p1y, tip1_x, tip1_y, 4, 2, cJawOrange, cJawDark);
+                    drawBeam(tip1_x, tip1_y, hook1_x, hook1_y, 4, 1, cJawOrange, cJawDark);
+                    gfx.drawLine(p1x, p1y, tip1_x, tip1_y, cJawLight);
+
+                    drawBeam(p2x, p2y, tip2_x, tip2_y, 4, 2, cJawOrange, cJawDark);
+                    drawBeam(tip2_x, tip2_y, hook2_x, hook2_y, 4, 1, cJawOrange, cJawDark);
+                    gfx.drawLine(p2x, p2y, tip2_x, tip2_y, cJawLight);
+
+                    // Čepy na těle klepeta
+                    gfx.fillCircle(p1x, p1y, 3, cCobotLight);
+                    gfx.drawCircle(p1x, p1y, 3, ST77XX_BLACK);
+                    gfx.fillCircle(p2x, p2y, 3, cCobotLight);
+                    gfx.drawCircle(p2x, p2y, 3, ST77XX_BLACK);
+                }
+                break;
+            }
+
+            // =======================================================
+            case MODE_DOCS: {
+                delay = 50;
+                static int docPage = 0;
+                static int lastDocPage = -1;
+                static bool lastBtnDownL = false;
+                static bool lastBtnDownR = false;
+
+                SensorData data = globalState.getSensorData();
+
+                // Listování stránkami dokumentace:
+                // Dolní tlačítka SW1 (vlevo) a SW3 (vpravo), případně joystick X
+                bool btnL = data.btnDown[0] || (data.joyX < 1000);
+                bool btnR = data.btnDown[2] || (data.joyX > 3000);
+
+                if (btnL && !lastBtnDownL) {
+                    if (docPage > 0) docPage--;
+                }
+                if (btnR && !lastBtnDownR) {
+                    if (docPage < 2) docPage++;
+                }
+                lastBtnDownL = btnL;
+                lastBtnDownR = btnR;
+
+                if (needsFullRedraw || docPage != lastDocPage) {
+                    lastDocPage = docPage;
+                    gfx.clearScreen(0x000F); // Tmavě modrá
+
+                    // Horní lišta
+                    gfx.fillRect(0, 0, 320, 30, 0x01B1);
+                    char header[32];
+                    snprintf(header, sizeof(header), "DOKUMENTACE [%d/3]", docPage + 1);
+                    gfx.drawTextPartial(45, 7, header, ST77XX_YELLOW, 0x01B1, 2);
+                    gfx.drawLine(0, 30, 319, 30, ST77XX_CYAN);
+
+                    // Spodní navigační lišta
+                    gfx.drawLine(0, 215, 319, 215, 0x4208);
+                    gfx.drawTextPartial(15, 222, "[< SW1 / Joy]  Listovat  [SW3 / Joy >]", ST77XX_WHITE, 0x000F, 1);
+
+                    // Obsah stránek dokumentace
+                    switch (docPage) {
+                        case 0: // Úvod a autor
+                            gfx.drawTextPartial(15, 45, "Maturitni prace: ESP-DEMO-BOX", ST77XX_GREEN, 0x000F, 2);
+                            gfx.drawTextPartial(15, 75, "Autor: Nik", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 95, "Platforma: 2x ESP32 (S3 + WROOM)", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 115, "Komunikace: Obousmerny UART s CRC", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 135, "Vybaveni: 2x Displej, IMU, Lasery,", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 155, "  barevny RGB senzor, serva, hry.", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 185, "-> Dalsi stranka: Hardwarove bloky", 0xFD20, 0x000F, 1);
+                            break;
+
+                        case 1: // Hardwarové bloky
+                            gfx.drawTextPartial(15, 45, "HARDWARE & PERIFERIE", ST77XX_CYAN, 0x000F, 2);
+                            gfx.drawTextPartial(15, 75, "Horni panel (ESP32-S3):", ST77XX_YELLOW, 0x000F, 1);
+                            gfx.drawTextPartial(15, 92, "- TFT 320x240, LCD 1602, 7-seg", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 107, "- IMU LSM6DS3, VL53L0X, HC-SR04", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 122, "- TCS34725, DHT11, IR senzory", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 142, "Dolni panel (ESP32-WROOM):", ST77XX_YELLOW, 0x000F, 1);
+                            gfx.drawTextPartial(15, 159, "- Smart Servo LX-16A, MG996R", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 174, "- OLED SSD1306, Joystick, Enkoder", ST77XX_WHITE, 0x000F, 1);
+                            break;
+
+                        case 2: // Filesystém a fotky
+                            gfx.drawTextPartial(15, 45, "FOTKY A PODKLADY", ST77XX_MAGENTA, 0x000F, 2);
+                            gfx.drawTextPartial(15, 75, "Pripraveno pro LittleFS / JPEG:", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 100, "- Pamet Flash: 16 MB celkem", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 120, "- Volny prostor pro data: 7 MB", ST77XX_GREEN, 0x000F, 1);
+                            gfx.drawTextPartial(15, 145, "- Moznost nahrat schemata,", ST77XX_WHITE, 0x000F, 1);
+                            gfx.drawTextPartial(15, 165, "  fotografie konstrukce i texty.", ST77XX_WHITE, 0x000F, 1);
+                            break;
+                    }
                 }
                 break;
             }
