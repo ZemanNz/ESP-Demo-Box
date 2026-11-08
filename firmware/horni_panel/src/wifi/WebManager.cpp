@@ -1,6 +1,7 @@
 #include "WebManager.h"    // Naše hlavička s deklarací třídy WebManager
 #include "WebPages.h"      // Soubor, kde máme zkompilované texty webu (HTML, CSS a JS)
 #include "WiFiCsiManager.h"// Wi-Fi CSI Radar a měření vzdálenosti
+#include "SensorManager.h" // Přímé ovládání bzučáku a fyzických senzorů
 #include <ArduinoJson.h>   // Knihovna pro snadnou práci s formátem JSON (čtení i tvorba zpráv)
 
 // --- Konstruktor: Vytvoření objektu WebManager ---
@@ -126,6 +127,9 @@ void WebManager::onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *
         // Klient se odpojil (např. vypnul Wi-Fi nebo odešel ze stránky)
         case WS_EVT_DISCONNECT:
             Serial.printf("[WebManager] WS Klient #%u odpojen\n", client->id());
+            if (server->count() == 0 && pState) {
+                pState->clearAllRemoteOverrides();
+            }
             break;
 
         // Od klienta přišla nová data (textová zpráva / JSON příkaz)
@@ -178,16 +182,17 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
     // 3. Příkaz pro nastavení úhlu klasického serva (0 až 180 stupňů)
     else if (strcmp(cmd, "setServo") == 0) {
         int val = doc["val"] | 90;
-        pState->updateServo((uint8_t)val);
+        pState->setRemoteServoOverride((uint8_t)val);
     }
     // 4. Příkaz pro nastavení chytrého serva (-180 až +180 stupňů)
     else if (strcmp(cmd, "setSmartServo") == 0) {
         int val = doc["val"] | 0;
-        pState->updateSmartServo((int16_t)val);
+        pState->setRemoteSmartServoOverride((int16_t)val);
     }
-    // 5. Příkaz pro nastavení rychlosti a směru motoru (-255 až +255)
+    // 5. Příkaz pro nastavení rychlosti a směru motoru / kontinuálního serva (-255 až +255)
     else if (strcmp(cmd, "setMotor") == 0) {
         int val = doc["val"] | 0;
+        pState->setRemoteContServoOverride((int8_t)constrain(val, -100, 100));
         pState->updateMotor((int16_t)val);
     }
     // 6. Příkaz pro nastavení barvy a jasu na RGB LED pásku WS2812B
@@ -199,24 +204,42 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
         
         // Spojíme R, G, B bajty do jednoho 32-bitového barevného čísla (0x00RRGGBB)
         uint32_t col = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-        uint32_t leds[8];
-        for (int i = 0; i < 8; i++) leds[i] = col; // Nastavíme stejnou barvu pro všech 8 LED na pásku
-        pState->updateLedStripTop(leds, bright);   // Zapíšeme do globálního stavu
+        pState->setRemoteLedOverride(col, bright);   // Zapíšeme do prioritního stavu s referencí senzoru
     }
     // 7. Příkaz pro spuštění kalibrace Wi-Fi CSI radaru
     else if (strcmp(cmd, "calibrateCsi") == 0) {
         wifiCsiManager.startCalibration(5000);
     }
-    // 8. Příkaz pro pípnutí bzučáku s danou frekvencí
+    // 8. Příkaz pro pípnutí fyzického bzučáku
     else if (strcmp(cmd, "beep") == 0) {
-        uint16_t freq = doc["freq"] | 1000;     // Frekvence v Hz (např. 1000 Hz)
-        pState->updateBuzzer(true, freq);       // Zapneme bzučák
+        uint16_t freq = doc["freq"] | 1000;         // Frekvence v Hz (např. 1000 Hz)
+        uint32_t duration = doc["duration"] | 150;  // Délka pípnutí v ms
+        if (duration > 1000) duration = 1000;      // Bezpečnostní limit
+        sensorManager.beep(freq, duration);        // Skutečné hardwarové pípnutí
     }
-    // 9. Příkaz pro virtuální stisk tlačítek dolního panelu (D-Pad dálkový ovladač)
+    // 9. Příkaz pro výběr aktivního senzoru vzdálenosti (přepíná zobrazení a 7-segment jako tlačítka 1, 2, 3)
+    else if (strcmp(cmd, "selectSensor") == 0) {
+        const char* s = doc["sensor"] | "ir";
+        if (strcmp(s, "ir") == 0 || strcmp(s, "1") == 0) {
+            pState->updateLeds(1, 0, 0); // Pouze IR
+        } else if (strcmp(s, "ultrasonic") == 0 || strcmp(s, "2") == 0) {
+            pState->updateLeds(0, 1, 0); // Pouze Ultrazvuk
+        } else if (strcmp(s, "laser") == 0 || strcmp(s, "3") == 0) {
+            pState->updateLeds(0, 0, 1); // Pouze Laser VL53L0X
+        }
+    }
+    // 10. Příkaz pro virtuální stisk tlačítek dolního panelu (D-Pad dálkový ovladač)
     else if (strcmp(cmd, "pressBtn") == 0) {
         int idx = doc["idx"] | 0;
         bool pressed = doc["pressed"] | false;
         pState->updateDownButton((uint8_t)idx, pressed);
+    }
+    // 11. Příkaz pro virtuální joystick z webu (X a Y 0..4095, střed 2048, tlačítko)
+    else if (strcmp(cmd, "setJoy") == 0) {
+        int x = doc["x"] | 2048;
+        int y = doc["y"] | 2048;
+        bool btn = doc["btn"] | false;
+        pState->updateJoystick((int16_t)x, (int16_t)y, btn);
     }
 }
 
@@ -274,10 +297,16 @@ void WebManager::broadcastTelemetry() {
         btndArr.add(d.btnDown[i]);
     }
 
-    // 6. Stavy výstupů
-    doc["led1"] = d.led_ult;                   // Stav LED ULT (1)
-    doc["led2"] = d.led_ir;                    // Stav LED IR (2)
-    doc["led3"] = d.led_laser;                 // Stav LED Laser (3)
+    // 6. Stavy výstupů a pohonů
+    doc["led_ir"] = d.led_ir;                  // Stav výběru IR dálkoměru (D1)
+    doc["led_ult"] = d.led_ult;                // Stav výběru ultrazvuku (D4)
+    doc["led_laser"] = d.led_laser;            // Stav výběru laseru VL53L0X (D5)
+    doc["led1"] = d.led_ir;                    // Zpětná kompatibilita
+    doc["led2"] = d.led_ult;
+    doc["led3"] = d.led_laser;
+    doc["servo"] = d.servoAngle;               // Aktuální úhel klasického serva
+    doc["smartservo"] = d.smartServoAngle;     // Aktuální pozice chytrého serva (klepeta)
+    doc["motor"] = d.continuousServoSpeed;     // Rychlost kontinuálního serva
 
     // 7. Systémové informace
     doc["mode"] = (int)mode;                   // Aktuální číslo běžícího módu na displeji

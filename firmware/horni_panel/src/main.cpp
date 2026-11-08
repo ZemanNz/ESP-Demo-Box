@@ -112,37 +112,49 @@ void updateClassicColorStrip(unsigned long now) {
 
     SensorData data = globalState.getSensorData();
 
-    // Přepočet a saturované zesílení barev pro horní LED pásek
-    float cr = (float)data.colorR;
-    float cg = (float)data.colorG * 1.35f; // Posílení zelené složky
-    float cb = (float)data.colorB * 0.85f; // Mírné zkrocení modré složky
-
-    float maxC = max(cr, max(cg, cb));
-    float minC = min(cr, min(cg, cb));
-    float deltaC = maxC - minC;
-
-    uint8_t outR = 0, outG = 0, outB = 0;
-    if (deltaC > 8.0f) {
-        float avgC = (cr + cg + cb) / 3.0f;
-        float satFactor = 2.4f; // Zvýraznění živosti odstínu na pásku
-        
-        float rBoost = max(0.0f, avgC + (cr - avgC) * satFactor);
-        float gBoost = max(0.0f, avgC + (cg - avgC) * satFactor);
-        float bBoost = max(0.0f, avgC + (cb - avgC) * satFactor);
-
-        float highest = max(rBoost, max(gBoost, bBoost));
-        if (highest > 0.0f) {
-            outR = (uint8_t)((rBoost / highest) * 255.0f);
-            outG = (uint8_t)((gBoost / highest) * 255.0f);
-            outB = (uint8_t)((bBoost / highest) * 255.0f);
-        }
-    } else if (maxC > 15.0f) {
-        outR = 180; outG = 180; outB = 180;
+    // 1. KONTROLA VÝZNAMNÉ ZMĚNY NA SENZORU (přiložení jiného odstínu ruší manuální režim z telefonu)
+    if (globalState.checkAndHandleColorSensorChange(data.colorR, data.colorG, data.colorB, data.colorClear)) {
+        Serial.println("[PRIORITA] Vyrazna zmena na barevnem senzoru TCS34725 -> vracim rizeni LED pasku automatice!");
     }
 
-    uint32_t stripColor = ((uint32_t)outR << 16) | ((uint32_t)outG << 8) | (uint32_t)outB;
-    uint8_t stripBright = (stripColor == 0) ? 5 : 25;
-    sensorManager.setLedStripColor(stripColor, stripBright);
+    // 2. APLIKACE BARVY: Buď manuální z mobilu (pokud je aktivní override), nebo automatika ze senzoru
+    uint32_t remoteColor;
+    uint8_t remoteBright;
+    if (globalState.getRemoteLedOverride(remoteColor, remoteBright)) {
+        sensorManager.setLedStripColor(remoteColor, remoteBright);
+    } else {
+        // Přepočet a saturované zesílení barev pro horní LED pásek podle TCS34725
+        float cr = (float)data.colorR;
+        float cg = (float)data.colorG * 1.35f; // Posílení zelené složky
+        float cb = (float)data.colorB * 0.85f; // Mírné zkrocení modré složky
+
+        float maxC = max(cr, max(cg, cb));
+        float minC = min(cr, min(cg, cb));
+        float deltaC = maxC - minC;
+
+        uint8_t outR = 0, outG = 0, outB = 0;
+        if (deltaC > 8.0f) {
+            float avgC = (cr + cg + cb) / 3.0f;
+            float satFactor = 2.4f; // Zvýraznění živosti odstínu na pásku
+            
+            float rBoost = max(0.0f, avgC + (cr - avgC) * satFactor);
+            float gBoost = max(0.0f, avgC + (cg - avgC) * satFactor);
+            float bBoost = max(0.0f, avgC + (cb - avgC) * satFactor);
+
+            float highest = max(rBoost, max(gBoost, bBoost));
+            if (highest > 0.0f) {
+                outR = (uint8_t)((rBoost / highest) * 255.0f);
+                outG = (uint8_t)((gBoost / highest) * 255.0f);
+                outB = (uint8_t)((bBoost / highest) * 255.0f);
+            }
+        } else if (maxC > 15.0f) {
+            outR = 180; outG = 180; outB = 180;
+        }
+
+        uint32_t stripColor = ((uint32_t)outR << 16) | ((uint32_t)outG << 8) | (uint32_t)outB;
+        uint8_t stripBright = (stripColor == 0) ? 5 : 25;
+        sensorManager.setLedStripColor(stripColor, stripBright);
+    }
 
     // Plynulé adaptivní řízení jasu LED barevného senzoru TCS34725 podle fotorezistorů (stále stejné pro všechny módy)
     uint32_t avgPhoto = ((uint32_t)data.photo1 + (uint32_t)data.photo2) / 2;
@@ -344,7 +356,7 @@ void Task_UART(void *pvParameters) {
             // B) Naplníme odchozí paket
             outPacket.startByte = UART_FRAME_START_TOP_TO_BOTTOM; // 0xAA
             outPacket.currentMode = (uint8_t)globalState.getMode();
-            outPacket.overrideAutonomy = false; // Nebo true podle potřeby
+            outPacket.overrideAutonomy = globalState.isRemoteServoOverride(); // Plné řízení z telefonu, pokud je aktivní override
             
             outPacket.targetSmartServoAngle = data.smartServoAngle;
             outPacket.targetServoAngle = data.servoAngle;
@@ -409,6 +421,11 @@ void Task_UART(void *pvParameters) {
             );
 
             if (inPacket.endByte == UART_FRAME_END && inPacket.checksum == calculatedCRC) {
+                // KONTROLA MANUÁLNÍHO ZÁSAHU NA DOLNÍM PANELU (potenciometr, switch2, joystick)
+                if (globalState.checkAndHandleHardwareServoChange(inPacket.potentiometer, inPacket.switch2, inPacket.joyX, inPacket.joyY)) {
+                    Serial.println("[PRIORITA] Fyzicky pohyb ovladaci na dolnim panelu -> vracim rizeni serv lokalnimu hardwaru!");
+                }
+
                 // DATA JSOU V POŘÁDKU -> Uložíme do SystemState
                 globalState.updateJoystick(inPacket.joyX, inPacket.joyY, inPacket.joyBtn);
                 globalState.updateDownButtons(
@@ -2471,7 +2488,6 @@ void Task_Display_UI(void *pvParameters) {
                 if (data.btnDown[BTN_DOWN_LEFT]) currentBaseAngleDeg -= 2.5f;
                 if (data.btnDown[BTN_DOWN_RIGHT]) currentBaseAngleDeg += 2.5f;
                 currentBaseAngleDeg = constrain(currentBaseAngleDeg, 0.0f, 172.0f);
-                int baseAngleDeg = (int)currentBaseAngleDeg;
 
                 // Joystick Y a tlačítka nahoru/dolů: zdvih ramene (1 kloub)
                 if (data.joyY < 1500) {
@@ -2486,8 +2502,17 @@ void Task_Display_UI(void *pvParameters) {
                 currentArmAngleDeg = constrain(currentArmAngleDeg, 15.0f, 75.0f);
                 int armDegInt = (int)currentArmAngleDeg;
 
-                // Nástroj / klepeto (chytré servo LX-16A):
-                bool isToolActive = data.switch2 || data.joyBtn;
+                // Určení hodnot: Vzdálené Wi-Fi řízení vs. Fyzický hardware
+                int baseAngleDeg;
+                bool isToolActive;
+                if (globalState.isRemoteServoOverride()) {
+                    baseAngleDeg = constrain((int)data.servoAngle, 0, 172);
+                    currentBaseAngleDeg = (float)baseAngleDeg;
+                    isToolActive = (data.smartServoAngle > 100);
+                } else {
+                    baseAngleDeg = (int)currentBaseAngleDeg;
+                    isToolActive = data.switch2 || data.joyBtn;
+                }
                 int gripperAngleDeg = isToolActive ? 70 : 0;
 
                 // Barevná paleta vycházející z referenčního obrázku:

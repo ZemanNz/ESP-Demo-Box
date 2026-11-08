@@ -142,6 +142,24 @@ private:
     bool bottomNeedsTx;
     SemaphoreHandle_t stateMutex;
 
+    // --- Vzdálené řízení (Wi-Fi Override) vs automatika senzorů ---
+    bool isLedOverrideActive;
+    uint32_t overrideLedColor;
+    uint8_t overrideLedBrightness;
+    uint16_t refColorR;
+    uint16_t refColorG;
+    uint16_t refColorB;
+    uint16_t refColorClear;
+
+    bool isServoOverrideActive;
+    uint8_t overrideServoAngle;
+    int16_t overrideSmartServoAngle;
+    int8_t overrideContinuousServo;
+    uint16_t refPotentiometer;
+    bool refSwitch2;
+    int16_t refJoyX;
+    int16_t refJoyY;
+
 public:
     SystemState() {
         currentMode = MODE_MAIN_MENU;
@@ -153,6 +171,23 @@ public:
         bottomNeedsTx = true;
         memset(&sensors, 0, sizeof(SensorData));
         stateMutex = xSemaphoreCreateMutex();
+
+        isLedOverrideActive = false;
+        overrideLedColor = 0;
+        overrideLedBrightness = 60;
+        refColorR = 0;
+        refColorG = 0;
+        refColorB = 0;
+        refColorClear = 0;
+
+        isServoOverrideActive = false;
+        overrideServoAngle = 90;
+        overrideSmartServoAngle = 0;
+        overrideContinuousServo = 0;
+        refPotentiometer = 0;
+        refSwitch2 = false;
+        refJoyX = 2048;
+        refJoyY = 2048;
     }
 
     // -----------------------------------------------------
@@ -581,6 +616,155 @@ public:
             xSemaphoreGive(stateMutex);
         }
         return res;
+    }
+
+    // =========================================================================
+    //  VZDÁLENÉ ŘÍZENÍ (WI-FI OVERRIDE) VS FYZICKÉ SENZORY / HARDWARE
+    // =========================================================================
+
+    // 1. Řízení LED pásku z telefonu
+    void setRemoteLedOverride(uint32_t color, uint8_t brightness) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isLedOverrideActive = true;
+            overrideLedColor = color;
+            overrideLedBrightness = brightness;
+            // Zapamatujeme si aktuální stav senzoru TCS34725 jako referenci
+            refColorR = sensors.colorR;
+            refColorG = sensors.colorG;
+            refColorB = sensors.colorB;
+            refColorClear = sensors.colorClear;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void clearRemoteLedOverride() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isLedOverrideActive = false;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    bool getRemoteLedOverride(uint32_t &color, uint8_t &brightness) {
+        bool active = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            active = isLedOverrideActive;
+            if (active) {
+                color = overrideLedColor;
+                brightness = overrideLedBrightness;
+            }
+            xSemaphoreGive(stateMutex);
+        }
+        return active;
+    }
+
+    // Vyhodnocení významné změny na barevném senzoru (přiložení jiného odstínu ruší telefon)
+    bool checkAndHandleColorSensorChange(uint16_t curR, uint16_t curG, uint16_t curB, uint16_t curClear) {
+        bool reverted = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            if (isLedOverrideActive) {
+                int diffR = abs((int)curR - (int)refColorR);
+                int diffG = abs((int)curG - (int)refColorG);
+                int diffB = abs((int)curB - (int)refColorB);
+                int totalDiff = diffR + diffG + diffB;
+
+                // Práh pro významnou změnu barvy (např. z červené na zelenou či přiložení vzorku)
+                if (totalDiff > 60 || abs((int)curClear - (int)refColorClear) > 80) {
+                    isLedOverrideActive = false;
+                    reverted = true;
+                }
+            }
+            xSemaphoreGive(stateMutex);
+        }
+        return reverted;
+    }
+
+    // 2. Řízení serv z telefonu
+    void setRemoteServoOverride(uint8_t angle) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isServoOverrideActive = true;
+            overrideServoAngle = angle;
+            sensors.servoAngle = angle;
+            refPotentiometer = sensors.potentiometer;
+            refSwitch2 = sensors.switch2;
+            refJoyX = sensors.joyX;
+            refJoyY = sensors.joyY;
+            bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void setRemoteSmartServoOverride(int16_t angle) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isServoOverrideActive = true;
+            overrideSmartServoAngle = angle;
+            sensors.smartServoAngle = angle;
+            refPotentiometer = sensors.potentiometer;
+            refSwitch2 = sensors.switch2;
+            refJoyX = sensors.joyX;
+            refJoyY = sensors.joyY;
+            bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void setRemoteContServoOverride(int8_t speed) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isServoOverrideActive = true;
+            overrideContinuousServo = speed;
+            sensors.continuousServoSpeed = speed;
+            refPotentiometer = sensors.potentiometer;
+            refSwitch2 = sensors.switch2;
+            refJoyX = sensors.joyX;
+            refJoyY = sensors.joyY;
+            bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    void clearRemoteServoOverride() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isServoOverrideActive = false;
+            bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    bool isRemoteServoOverride() {
+        bool active = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            active = isServoOverrideActive;
+            xSemaphoreGive(stateMutex);
+        }
+        return active;
+    }
+
+    // Vyhodnocení fyzického pohybu na dolním panelu (potenciometr, switch2, joystick)
+    bool checkAndHandleHardwareServoChange(uint16_t curPot, bool curSw2, int16_t curJoyX, int16_t curJoyY) {
+        bool reverted = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            if (isServoOverrideActive) {
+                bool potMoved = abs((int)curPot - (int)refPotentiometer) > 70;
+                bool sw2Toggled = (curSw2 != refSwitch2);
+                bool joyMoved = (abs(curJoyX - 2048) > 600 || abs(curJoyY - 2048) > 600);
+
+                if (potMoved || sw2Toggled || joyMoved) {
+                    isServoOverrideActive = false;
+                    bottomNeedsTx = true;
+                    reverted = true;
+                }
+            }
+            xSemaphoreGive(stateMutex);
+        }
+        return reverted;
+    }
+
+    void clearAllRemoteOverrides() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            isLedOverrideActive = false;
+            isServoOverrideActive = false;
+            bottomNeedsTx = true;
+            xSemaphoreGive(stateMutex);
+        }
     }
 };
 

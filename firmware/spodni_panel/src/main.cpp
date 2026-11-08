@@ -122,8 +122,32 @@ void Task_UART(void *pvParameters) {
 // =============================================================================
 
 // 1. Klasické řízení serv (MG996R potenciometrem, LX-16A switchem 2, kontinuální joystickem X)
+// Podporuje také vzdálené Wi-Fi řízení z horního panelu (overrideAutonomy)
 void updateClassicServos(const BottomInputs& in, int& classicServoAngle, int& last_stupit_angle,
-                         int& lastSwitch2, int& smartTargetDeg, int8_t& contSpeed) {
+                         int& lastSwitch2, int& smartTargetDeg, int8_t& contSpeed,
+                         bool overrideAutonomy, const BottomOutputs& outputs) {
+    if (overrideAutonomy) {
+        // VZDÁLENÉ ŘÍZENÍ Z WEBU / MOBILU:
+        classicServoAngle = constrain((int)outputs.targetServoAngle, 0, 172);
+        if (classicServoAngle != last_stupit_angle) {
+            last_stupit_angle = classicServoAngle;
+            sensorManager.setServoClassic(classicServoAngle);
+        }
+
+        smartTargetDeg = outputs.targetSmartServoAngle;
+        if (smartTargetDeg != lastSwitch2) {
+            lastSwitch2 = smartTargetDeg;
+            sensorManager.setSmartServo(smartTargetDeg);
+        }
+
+        contSpeed = outputs.targetContinuousServo;
+        if (in.limitMin && contSpeed > 0) contSpeed = 0;
+        if (in.limitMax && contSpeed < 0) contSpeed = 0;
+        sensorManager.setServoCont(contSpeed);
+        return;
+    }
+
+    // LOKÁLNÍ AUTONOMNÍ ŘÍZENÍ Z HARDWARU:
     // Klasické servo (0 až 172°):
     classicServoAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
     if (classicServoAngle > (last_stupit_angle + 2) || classicServoAngle < (last_stupit_angle - 2)) {
@@ -206,6 +230,7 @@ void Task_Sensors(void *pvParameters) {
 
         BottomInputs in = globalState.getInputs();
         AppMode currentMode = globalState.getMode();
+        BottomOutputs outputs = globalState.getOutputs();
 
         unsigned long now = millis();
 
@@ -552,43 +577,61 @@ void Task_Sensors(void *pvParameters) {
             }
 
             case MODE_SERVA: {
-                // V módu robotického ramene (SERVA):
-                // 1. Klasické servo (MG996R) je řízeno potenciometrem i joystickem X
-                int potAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
-                static int lastPotVal = -1;
-                if (lastPotVal == -1) {
-                    lastPotVal = potAngle;
-                    classicServoAngle = potAngle;
-                } else if (abs(potAngle - lastPotVal) > 2) {
-                    lastPotVal = potAngle;
-                    classicServoAngle = potAngle;
-                }
+                if (outputs.overrideAutonomy) {
+                    // VZDÁLENÉ ŘÍZENÍ Z WEBU / MOBILU (Wi-Fi Override):
+                    classicServoAngle = constrain((int)outputs.targetServoAngle, 0, 172);
+                    if (classicServoAngle != last_stupit_angle) {
+                        last_stupit_angle = classicServoAngle;
+                        sensorManager.setServoClassic(classicServoAngle);
+                    }
 
-                // Joystick X plynule otáčí servo doleva / doprava stejně jako potenciometr
-                if (in.joyX < 1500) {
-                    int step = map(1500 - in.joyX, 0, 1500, 1, 3);
-                    classicServoAngle = constrain(classicServoAngle + step, 0, 172);
-                } else if (in.joyX > 2500) {
-                    int step = map(in.joyX - 2500, 0, 1595, 1, 3);
-                    classicServoAngle = constrain(classicServoAngle - step, 0, 172);
-                }
+                    smartTargetDeg = outputs.targetSmartServoAngle;
+                    if (smartTargetDeg != lastSwitch2) {
+                        lastSwitch2 = smartTargetDeg;
+                        sensorManager.setSmartServo(smartTargetDeg);
+                    }
 
-                if (classicServoAngle > (last_stupit_angle + 1) || classicServoAngle < (last_stupit_angle - 1)) {
-                    last_stupit_angle = classicServoAngle;
-                    sensorManager.setServoClassic(classicServoAngle);
-                }
+                    contSpeed = 0;
+                    sensorManager.setServoCont(0);
+                } else {
+                    // LOKÁLNÍ ŘÍZENÍ Z HARDWARU:
+                    // 1. Klasické servo (MG996R) je řízeno potenciometrem i joystickem X
+                    int potAngle = map(constrain((int)in.potentiometer, 0, 4095), 0, 4095, 172, 0);
+                    static int lastPotVal = -1;
+                    if (lastPotVal == -1) {
+                        lastPotVal = potAngle;
+                        classicServoAngle = potAngle;
+                    } else if (abs(potAngle - lastPotVal) > 2) {
+                        lastPotVal = potAngle;
+                        classicServoAngle = potAngle;
+                    }
 
-                // 2. Chytré servo (LX-16A) spínačem Switch 2 nebo stiskem joysticku (sevření/otevření klepeta)
-                bool isClosed = in.switch2 || in.joyBtn;
-                int targetDeg = isClosed ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
-                if (targetDeg != smartTargetDeg) {
-                    smartTargetDeg = targetDeg;
-                    sensorManager.setSmartServo(smartTargetDeg);
-                }
+                    // Joystick X plynule otáčí servo doleva / doprava stejně jako potenciometr
+                    if (in.joyX < 1500) {
+                        int step = map(1500 - in.joyX, 0, 1500, 1, 3);
+                        classicServoAngle = constrain(classicServoAngle + step, 0, 172);
+                    } else if (in.joyX > 2500) {
+                        int step = map(in.joyX - 2500, 0, 1595, 1, 3);
+                        classicServoAngle = constrain(classicServoAngle - step, 0, 172);
+                    }
 
-                // 3. Kontinuální 360° servo je v tomto módu ZCELA VYPNUTÉ (aby se nehýbalo joystickem)
-                contSpeed = 0;
-                sensorManager.setServoCont(0);
+                    if (classicServoAngle > (last_stupit_angle + 1) || classicServoAngle < (last_stupit_angle - 1)) {
+                        last_stupit_angle = classicServoAngle;
+                        sensorManager.setServoClassic(classicServoAngle);
+                    }
+
+                    // 2. Chytré servo (LX-16A) spínačem Switch 2 nebo stiskem joysticku (sevření/otevření klepeta)
+                    bool isClosed = in.switch2 || in.joyBtn;
+                    int targetDeg = isClosed ? SMART_SERVO_MAX_DEG : SMART_SERVO_MIN_DEG;
+                    if (targetDeg != smartTargetDeg) {
+                        smartTargetDeg = targetDeg;
+                        sensorManager.setSmartServo(smartTargetDeg);
+                    }
+
+                    // 3. Kontinuální 360° servo je v tomto módu ZCELA VYPNUTÉ (aby se nehýbalo joystickem)
+                    contSpeed = 0;
+                    sensorManager.setServoCont(0);
+                }
 
                 // LED pásek: jemná modro-azurová technologická indikace
                 if (now - lastPrintTime >= 250) {
@@ -609,7 +652,8 @@ void Task_Sensors(void *pvParameters) {
             case MODE_DOCS:
             default: {
                 // 1. Klasické řízení serv (potenciometr -> servo, switch 2 -> LX-16A, joystick X -> kontinuální)
-                updateClassicServos(in, classicServoAngle, last_stupit_angle, lastSwitch2, smartTargetDeg, contSpeed);
+                updateClassicServos(in, classicServoAngle, last_stupit_angle, lastSwitch2, smartTargetDeg, contSpeed,
+                                    outputs.overrideAutonomy, outputs);
 
                 // 2. Efekt plynulé duhy na spodním LED pásku (každých 250 ms)
                 if (now - lastPrintTime >= 250) {
