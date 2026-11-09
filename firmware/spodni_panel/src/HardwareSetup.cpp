@@ -91,7 +91,9 @@ bool setupServosAndMotors() {
     Serial.printf("[SMART_SERVO] Testuji LX-16A (dotaz na ID)... \n");
     uint8_t id = servoBus.getId();
     if (id == 255) {
-        Serial.println(F("[SMART_SERVO] VAROVANI: LX-16A neodpovídá na ping (broadcast 254). Pokračuji..."));
+        lastHardwareError = "LX-16A servo neodpovida";
+        Serial.println(F("[SMART_SERVO] CHYBA: LX-16A neodpovídá na ping (broadcast 254)!"));
+        return false;
     } else {
         Serial.printf("[SMART_SERVO] OK – LX-16A nalezeno s ID %d\n", id);
         if (id != 0) {
@@ -259,7 +261,15 @@ bool waitForHandshakeWithTop(bool hardwareOk, const String& errorMsg) {
         // Neustále vysíláme chybu, aby ji horní panel mohl zachytit kdykoliv dokončí svůj pomalejší boot
         while (true) {
             SerialTop.printf("BOOT:ERR:%s\n", errorMsg.c_str());
-            delay(200);
+            if (SerialTop.available()) {
+                String resp = SerialTop.readStringUntil('\n');
+                resp.trim();
+                if (resp == "BOOT:START") {
+                    Serial.println("[HANDSHAKE] Horni panel povolil preskoceni chyby (BOOT:START)! Pokracuji.");
+                    return true;
+                }
+            }
+            delay(150);
         }
         return false;
     }
