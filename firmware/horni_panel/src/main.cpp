@@ -999,10 +999,11 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setLeds(false, false, false);
                 #endif
 
-                // 3. Zhasneme 8-LED WS2812B pásek
+                // 3. Zhasneme 8-LED WS2812B pásek a vestavěnou RGB LED na desce ESP32 (GPIO 38)
                 #ifdef ENABLE_WS2812B
                     uint32_t offLeds[8] = {0};
                     sensorManager.setLedStrip(offLeds, 0);
+                    sensorManager.setBuiltinRgb(0, 0, 0);
                 #endif
 
                 // 4. Vypneme bzučák

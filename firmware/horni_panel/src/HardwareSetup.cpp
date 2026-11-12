@@ -4,8 +4,7 @@
 #include <SPI.h>
 
 #include "GraphicsManager.h"
-// Objekt gfx je deklarován v GraphicsManager.h a vytvořen v GraphicsManager.cpp, 
-// takže ho tu nemusíme vytvářet znovu.
+// Objekt gfx je deklarován v GraphicsManager.h a vytvořen v GraphicsManager.cpp
 
 // Globální instance UART1 pro komunikaci se spodním panelem
 HardwareSerial SerialESP(1);
@@ -47,8 +46,7 @@ HardwareSerial SerialESP(1);
   Adafruit_NeoPixel builtinPixel(1, 38, NEO_GRB + NEO_KHZ800);
 #endif
 
-
-// Pomocná funkce pro 74HC595 (jen pro vymazání při startu)
+// Pomocná funkce pro 74HC595 (vymazání při startu)
 #ifdef ENABLE_74HC595
   static void seg_clear() {
     digitalWrite(PIN_SEG_LATCH, LOW);
@@ -60,20 +58,38 @@ HardwareSerial SerialESP(1);
 #endif
 
 // ---------------------------------------------------------
-// Pomocná funkce pro vykreslení Fail Logu na displej
+// Vykreslení řádku POST diagnostické tabulky na TFT displej
 // ---------------------------------------------------------
-void drawErrorScreen(String errorMessage) {
-    Serial.println("[FAIL LOG] " + errorMessage);
+static void drawPostRow(int rowIdx, const char* name, bool ok, const char* errDetail = nullptr) {
+    int y = 42 + rowIdx * 19;
 #ifdef ENABLE_TFT_ST7789
-    // Nyní používáme bezpečně GraphicsManager pro kreslení chyb!
-    gfx.clearScreen(ST77XX_RED);
-    gfx.drawTextPartial(10, 40, "KRITICKA CHYBA:", ST77XX_WHITE, ST77XX_RED, 2);
-    gfx.drawTextPartial(10, 100, errorMessage, ST77XX_WHITE, ST77XX_RED, 1);
+    // 1. Smazání plochy řádku
+    gfx.fillRect(0, y, 320, 18, ST77XX_BLACK);
+
+    // 2. Název komponenty vlevo
+    gfx.drawTextPartial(16, y + 4, name, ST77XX_WHITE, ST77XX_BLACK, 1);
+
+    // 3. Šipka uprostřed
+    gfx.drawTextPartial(168, y + 4, "->", ST77XX_CYAN, ST77XX_BLACK, 1);
+
+    // 4. Stav vpravo: zelené [ BOOT OK ] nebo červené [ FAILED ]
+    if (ok) {
+        gfx.drawTextPartial(200, y + 4, "[ BOOT OK ]", ST77XX_GREEN, ST77XX_BLACK, 1);
+    } else {
+        gfx.drawTextPartial(200, y + 4, "[ FAILED ]", ST77XX_RED, ST77XX_BLACK, 1);
+    }
 #endif
+
+    if (ok) {
+        Serial.printf("[POST] %-20s -> OK\n", name);
+    } else {
+        Serial.printf("[POST] %-20s -> FAILED! (%s)\n", name, errDetail ? errDetail : "Chyba");
+    }
+    delay(40); // Krátká vizuální pauza pro efekt postupného testování
 }
 
 // ---------------------------------------------------------
-// Inicializace jednotlivých modulů
+// Inicializace displeje ST7789
 // ---------------------------------------------------------
 bool setupDisplay() {
 #ifdef ENABLE_TFT_ST7789
@@ -82,133 +98,30 @@ bool setupDisplay() {
         digitalWrite(PIN_TFT_LED, HIGH);
     #endif
 
-    // SPI Sběrnici musí zapnout HardwareSetup jako hlavní dirigent hardware
+    // Inicializace SPI sběrnice
     SPI.begin(PIN_TFT_SCLK, PIN_TFT_MISO, PIN_TFT_MOSI, PIN_TFT_CS);
     
-    // Potom zavoláme Manažera, aby oživil samotný displej
+    // Inicializace samotného ST7789 řadiče
     if (!gfx.init()) {
+        Serial.println("[TFT] CHYBA: Inicializace displeje ST7789 selhala!");
         return false;
     }
     
-    // Kreslení testovací zelené obrazovky už dělá Manažer
-    gfx.drawTextPartial(20, 15, "BOOT: OK", ST77XX_GREEN, ST77XX_BLACK, 2);
+    // Úvodní vyčištění a záhlaví POST tabulky
+    gfx.clearScreen(ST77XX_BLACK);
+    gfx.fillRect(0, 0, 320, 34, 0x1125); // Tmavě modro-šedá lišta
+    gfx.drawTextPartial(16, 12, "ESP-DEMO-BOX: KONTROLA HARDWARU", ST77XX_WHITE, 0x1125, 1);
+    gfx.drawLine(0, 34, 320, 34, ST77XX_CYAN);
+
+    drawPostRow(0, "1. TFT ST7789 SPI", true);
 #endif
     return true; 
 }
 
-bool setupSensors() {
-    Serial.println("[SETUP] Inicializace senzoru a periferii na hornim panelu...");
-    
-    // --- 1. I2C Sběrnice ---
-#if defined(ENABLE_LSM6DS3) || defined(ENABLE_LCD1602) || defined(ENABLE_VL53L0X)
-    if (!Wire.begin(I2C0_SDA, I2C0_SCL)) {
-        drawErrorScreen("I2C_0 sbernice selhala!\n(SDA=" + String(I2C0_SDA) + ", SCL=" + String(I2C0_SCL) + ")");
-        return false;
-    }
-    Wire.setClock(400000); // 400 kHz Fast I2C pro plynulé vyčítání gyroskopu a periferií
-    Serial.println("[I2C_0] OK – Sbernice spustena (400 kHz).");
-#endif
-
-#ifdef ENABLE_TCS34725
-    if (!Wire1.begin(I2C1_SDA, I2C1_SCL)) {
-        drawErrorScreen("I2C_1 sbernice selhala!\n(SDA=" + String(I2C1_SDA) + ", SCL=" + String(I2C1_SCL) + ")");
-        return false;
-    }
-    Serial.println("[I2C_1] OK – Sbernice spustena.");
-#endif
-
-    // --- 2. Složité I2C Senzory (s kontrolou odpovědi) ---
-#ifdef ENABLE_LSM6DS3
-    bool lsmOk = false;
-    uint8_t lsmAddr = 0x6B;
-    if (lsm6ds3.begin_I2C(0x6B, &Wire)) {
-        lsmOk = true;
-        lsmAddr = 0x6B;
-        Serial.println("[LSM6DS3]    OK – Wire 0x6B");
-    } else if (lsm6ds3.begin_I2C(0x6A, &Wire)) {
-        lsmOk = true;
-        lsmAddr = 0x6A;
-        Serial.println("[LSM6DS3]    OK – Wire 0x6A");
-    } else {
-        Serial.println("[LSM6DS3]    CHYBA: Senzor neodpovida na 0x6B ani 0x6A!");
-        drawErrorScreen("LSM6DS3 Gyro/Akcel\nneodpovida na I2C (0x6B/0x6A)!");
-        return false;
-    }
-
-    if (lsmOk) {
-        lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); // 500 DPS pro přesný a rychlý pohyb bez saturace
-        lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
-        lsm6ds3.setGyroDataRate(LSM6DS_RATE_104_HZ);
-        lsm6ds3.setAccelDataRate(LSM6DS_RATE_104_HZ);
-        lsm6ds3.configInt1(false, false, false); // VYPNOUT Data-Ready
-
-        // --- Nastavení HARDWAROVÉHO WAKE-UP PŘI NÁRAZU (z config.h) ---
-        Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission(); // TAP_CFG: INTERRUPTS_ENABLE + SLOPE_FDS
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(IMU_WAKEUP_DUR); Wire.endTransmission(); // WAKE_UP_DUR: 0 ODR
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(IMU_WAKEUP_THS); Wire.endTransmission(); // WAKE_UP_THS: 0x02 = extra citlivé na prst
-        Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission(); // MD1_CFG: INT1_WU (probuzení na pin INT1)
-        
-        #ifdef PIN_IMU_INT
-            pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
-            attachInterrupt(digitalPinToInterrupt(PIN_IMU_INT), imuWakeupIsr, RISING);
-        #endif
-        
-        Serial.printf("[LSM6DS3]    Probuzeni na INT1 (GPIO %d) aktivni s prahem 0x%02X (~125 mg).\n",
-                      PIN_IMU_INT, IMU_WAKEUP_THS);
-    }
-#endif
-
-#ifdef ENABLE_VL53L0X
-    vl53.setBus(&Wire);
-    vl53.setTimeout(500);
-    if (!vl53.init()) {
-        drawErrorScreen("VL53L0X Laser dalkomer\nneodpovida na I2C (0x29)!");
-        return false;
-    }
-    vl53.startContinuous(100); // Spuštění kontinuálního měření každých 100 ms
-    Serial.println("[VL53L0X]   OK – Laser dalkomer pripraven (continuous 100ms).");
-#endif
-
-#ifdef ENABLE_TCS34725
-    if (!tcs.begin(TCS34725_ADDRESS, &Wire1)) {
-        drawErrorScreen("TCS34725 Barevny senzor\nneodpovida na I2C_1!");
-        return false;
-    }
-    Serial.println("[TCS34725]  OK – Barevny senzor pripraven.");
-#endif
-
-#ifdef ENABLE_LCD1602
-    Wire.beginTransmission(0x27);
-    if (Wire.endTransmission() != 0) {
-        drawErrorScreen("LCD 1602 displej (0x27)\nneodpovida na I2C!");
-        return false;
-    }
-    lcd.init();
-    lcd.backlight();
-    lcd.setCursor(0, 0);
-    lcd.print("ESP-Demo-Box OK");
-    Serial.println("[LCD1602]   OK – Displej 16x2 inicializovan.");
-#endif
-
-    // --- 3. Jednoduché senzory s testem odezvy ---
-#if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
-    dht.begin();
-    delay(100);
-    float testTemp = dht.readTemperature();
-    float testHum = dht.readHumidity();
-    if (isnan(testTemp) && isnan(testHum)) {
-        // Zkusíme ještě jedno rychlé přečtení po krátké prodlevě
-        delay(250);
-        testTemp = dht.readTemperature();
-        testHum = dht.readHumidity();
-        if (isnan(testTemp) && isnan(testHum)) {
-            drawErrorScreen("DHT Teplomer/Vlhkomer\nneodpovida na GPIO " + String(PIN_DHT) + "!");
-            return false;
-        }
-    }
-    Serial.println("[DHT]       OK – Teplota a vlhkost funkcni.");
-#endif
-
+// ---------------------------------------------------------
+// Inicializace ostatních GPIO periferií (LED, Bzučák, Piny)
+// ---------------------------------------------------------
+static void setupGpioPeripherals() {
 #ifdef ENABLE_ULTRASONIC
     pinMode(PIN_ULTRASONIC_TRIG, OUTPUT);
     pinMode(PIN_ULTRASONIC_ECHO, INPUT);
@@ -216,9 +129,9 @@ bool setupSensors() {
 #endif
 
 #ifdef ENABLE_IR_SENSORS
-    analogSetPinAttenuation(PIN_IR1, ADC_11db); // IR1: analogové měření vzdálenosti (GPIO 20)
+    analogSetPinAttenuation(PIN_IR1, ADC_11db); // IR1 analog vzdálenost (GPIO 20)
     pinMode(PIN_IR1, INPUT);
-    pinMode(PIN_IR2, INPUT);                    // IR2: digitální překážka (GPIO 38)
+    pinMode(PIN_IR2, INPUT);                    // IR2 digitální překážka (GPIO 38)
 #endif
 
 #ifdef ENABLE_PHOTORESISTORS
@@ -236,9 +149,6 @@ bool setupSensors() {
 #ifdef ENABLE_BUZZER
     pinMode(PIN_BUZZER, OUTPUT);
     digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL); // Klidový stav = TICHO
-#else
-    pinMode(PIN_BUZZER, OUTPUT);
-    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
 #endif
 
 #ifdef ENABLE_LEDS
@@ -246,17 +156,17 @@ bool setupSensors() {
     pinMode(PIN_LED2, OUTPUT);
     pinMode(PIN_LED3, OUTPUT);
 
-    // Krátký boot test 3 LED nad senzory (běžící světlo D1 -> D4 -> D5)
-    digitalWrite(PIN_LED1, HIGH); delay(100); digitalWrite(PIN_LED1, LOW);
-    digitalWrite(PIN_LED2, HIGH); delay(100); digitalWrite(PIN_LED2, LOW);
-    digitalWrite(PIN_LED3, HIGH); delay(100); digitalWrite(PIN_LED3, LOW);
+    // Krátký boot test 3 LED nad senzory (D1 -> D4 -> D5)
+    digitalWrite(PIN_LED1, HIGH); delay(80); digitalWrite(PIN_LED1, LOW);
+    digitalWrite(PIN_LED2, HIGH); delay(80); digitalWrite(PIN_LED2, LOW);
+    digitalWrite(PIN_LED3, HIGH); delay(80); digitalWrite(PIN_LED3, LOW);
 #endif
 
 #if defined(PIN_TCS_LED) && (PIN_TCS_LED >= 0)
-    // Inicializace hardwarového PWM (LEDC) pro plynulou regulaci jasu LED na TCS34725
+    // LEDC PWM regulace pro přisvětlovací LED senzoru barev
     ledcSetup(LEDC_CHAN_TCS_LED, LEDC_FREQ_TCS_LED, LEDC_RES_TCS_LED);
     ledcAttachPin(PIN_TCS_LED, LEDC_CHAN_TCS_LED);
-    ledcWrite(LEDC_CHAN_TCS_LED, 60); // Výchozí decentní svit
+    ledcWrite(LEDC_CHAN_TCS_LED, 60);
 #endif
 
 #ifdef ENABLE_WS2812B
@@ -273,56 +183,12 @@ bool setupSensors() {
     pinMode(PIN_SEG_DATA,  OUTPUT);
     pinMode(PIN_SEG_CLK,   OUTPUT);
     pinMode(PIN_SEG_LATCH, OUTPUT);
-    seg_clear(); // Vyčistí staré znaky
+    seg_clear();
 #endif
-
-    return true;
-}
-
-
-bool setupUART() {
-    Serial.println("[SETUP] Inicializace UART komunikace a Handshake...");
-#ifdef ENABLE_UART_ESP
-    SerialESP.begin(UART_ESP_BAUD, SERIAL_8N1, UART_ESP_RX, UART_ESP_TX);
-    Serial.println("[SETUP] SerialESP (UART1) spusten na 115200 baud.");
-
-    // --- SYNCHRONIZAČNÍ BOOT HANDSHAKE SE SPODNÍM PANELEM ---
-    Serial.println("[HANDSHAKE] Cekam na potvrzeni pripravenosti spodniho panelu...");
-    SerialESP.flush();
-    unsigned long startTime = millis();
-
-    while (millis() - startTime < 3500) { // Timeout 3.5 sekundy
-        if (SerialESP.available()) {
-            String msg = SerialESP.readStringUntil('\n');
-            msg.trim();
-
-            // 1. Spodní panel je v pořádku
-            if (msg == "BOOT:READY") {
-                SerialESP.println("BOOT:START"); // Povolíme spodnímu panelu start
-                Serial.println("[HANDSHAKE] Spodni panel OK! Spoustim system...");
-                return true;
-            }
-
-            // 2. Spodní panel hlásí chybu inicializace hardwaru
-            if (msg.startsWith("BOOT:ERR:")) {
-                String errorReason = msg.substring(9);
-                drawErrorScreen("CHYBA DOLNIHO PANELU:\n" + errorReason);
-                return false;
-            }
-        }
-        delay(10);
-    }
-
-    // 3. Spodní panel neodpověděl v časovém limitu -> neblokujeme systém, linka naskočí za běhu
-    Serial.println("[HANDSHAKE] Spodni panel zatim neodpovedel (UART se synchronizuje automaticky za behu).");
-    SerialESP.println("BOOT:START");
-    return true;
-#endif
-    return true;
 }
 
 // ---------------------------------------------------------
-// Hlavní sdružující funkce (Master Setup)
+// Hlavní sdružující funkce (Master Setup & POST diagnostika)
 // ---------------------------------------------------------
 bool initializeAllHardware() {
     Serial.println("\n=====================================");
@@ -330,18 +196,190 @@ bool initializeAllHardware() {
     Serial.println("=====================================");
 
     // 1. DISPLEJ MUSÍ BÝT PRVNÍ!
-    if (!setupDisplay()) return false;
-    
-    // 2. SENZORY
-    if (!setupSensors()) return false;
-    
-    
-    // 4. UART & HANDSHAKE
-    if (!setupUART()) return false;
+    if (!setupDisplay()) {
+        return false;
+    }
 
-    Serial.println("-------------------------------------");
-    Serial.println(">> Vsechen hardware je PRIPRAVEN <<");
-    Serial.println("=====================================\n");
-    
-    return true;
+    bool allPassed = true;
+
+    // 2. I2C_0 Sběrnice
+    bool i2c0Ok = Wire.begin(I2C0_SDA, I2C0_SCL);
+    if (i2c0Ok) {
+        Wire.setClock(400000); // 400 kHz Fast I2C
+    } else {
+        allPassed = false;
+    }
+    drawPostRow(1, "2. I2C_0 Sbernice", i2c0Ok, i2c0Ok ? nullptr : "SDA/SCL selhalo");
+
+    // 3. Laserový dálkoměr VL53L0X
+    bool laserOk = false;
+    if (i2c0Ok) {
+        vl53.setBus(&Wire);
+        vl53.setTimeout(400);
+        if (vl53.init()) {
+            laserOk = true;
+            vl53.startContinuous(100);
+        }
+    }
+    if (!laserOk) allPassed = false;
+    drawPostRow(2, "3. Laser VL53L0X", laserOk, laserOk ? nullptr : "0x29 neodpovida");
+
+    // 4. Gyroskop a Akcelerometr LSM6DS3
+    bool gyroOk = false;
+    uint8_t lsmAddr = 0x6B;
+    if (i2c0Ok) {
+        if (lsm6ds3.begin_I2C(0x6B, &Wire)) {
+            gyroOk = true;
+            lsmAddr = 0x6B;
+        } else if (lsm6ds3.begin_I2C(0x6A, &Wire)) {
+            gyroOk = true;
+            lsmAddr = 0x6A;
+        }
+
+        if (gyroOk) {
+            lsm6ds3.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS);
+            lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_4_G);
+            lsm6ds3.setGyroDataRate(LSM6DS_RATE_104_HZ);
+            lsm6ds3.setAccelDataRate(LSM6DS_RATE_104_HZ);
+            lsm6ds3.configInt1(false, false, false);
+
+            Wire.beginTransmission(lsmAddr); Wire.write(0x58); Wire.write(0x90); Wire.endTransmission();
+            Wire.beginTransmission(lsmAddr); Wire.write(0x5C); Wire.write(IMU_WAKEUP_DUR); Wire.endTransmission();
+            Wire.beginTransmission(lsmAddr); Wire.write(0x5B); Wire.write(IMU_WAKEUP_THS); Wire.endTransmission();
+            Wire.beginTransmission(lsmAddr); Wire.write(0x5E); Wire.write(0x20); Wire.endTransmission();
+            
+            #ifdef PIN_IMU_INT
+            pinMode(PIN_IMU_INT, INPUT_PULLDOWN);
+            attachInterrupt(digitalPinToInterrupt(PIN_IMU_INT), imuWakeupIsr, RISING);
+            #endif
+        }
+    }
+    if (!gyroOk) allPassed = false;
+    drawPostRow(3, "4. Gyro LSM6DS3", gyroOk, gyroOk ? nullptr : "0x6B/6A neodpovida");
+
+    // Inicializace LCD 1602 na I2C_0 (pokud je připojen)
+#ifdef ENABLE_LCD1602
+    if (i2c0Ok) {
+        Wire.beginTransmission(0x27);
+        if (Wire.endTransmission() == 0) {
+            lcd.init();
+            lcd.backlight();
+            lcd.setCursor(0, 0);
+            lcd.print("ESP-Demo-Box OK");
+        }
+    }
+#endif
+
+    // 5. Barevný RGB senzor TCS34725 (na I2C_1)
+    bool tcsOk = false;
+    bool i2c1Ok = Wire1.begin(I2C1_SDA, I2C1_SCL);
+    if (i2c1Ok) {
+        tcsOk = tcs.begin(TCS34725_ADDRESS, &Wire1);
+    }
+    if (!tcsOk) allPassed = false;
+    drawPostRow(4, "5. Barva TCS34725", tcsOk, tcsOk ? nullptr : "I2C_1 neodpovida");
+
+    // 6. Teploměr a Vlhkoměr DHT11
+    bool dhtOk = false;
+#if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
+    dht.begin();
+    delay(80);
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    if (!isnan(t) || !isnan(h)) {
+        dhtOk = true;
+    } else {
+        delay(150);
+        t = dht.readTemperature();
+        h = dht.readHumidity();
+        if (!isnan(t) || !isnan(h)) dhtOk = true;
+    }
+#endif
+    if (!dhtOk) allPassed = false;
+    drawPostRow(5, "6. Klima DHT11", dhtOk, dhtOk ? nullptr : "GPIO 16 neodpovida");
+
+    // Inicializace zbývajících GPIO pinů (LEDky, bzučák, pásky)
+    setupGpioPeripherals();
+
+    // 7. UART Linka a 8. Spodní panel HW
+    Serial.println("[SETUP] Inicializace UART linky a synchronizace se spodnim panelem...");
+    SerialESP.begin(UART_ESP_BAUD, SERIAL_8N1, UART_ESP_RX, UART_ESP_TX);
+    SerialESP.flush();
+
+    bool uartLinkOk = false;
+    bool bottomHwOk = false;
+    String bottomErrReason = "";
+
+    unsigned long uartStart = millis();
+    while (millis() - uartStart < 2500) { // Timeout 2.5 s
+        if (SerialESP.available()) {
+            String msg = SerialESP.readStringUntil('\n');
+            msg.trim();
+            if (msg.length() > 0) {
+                uartLinkOk = true; // Zpráva dorazila -> kabelové spojení funguje!
+                if (msg == "BOOT:READY") {
+                    bottomHwOk = true;
+                    SerialESP.println("BOOT:START");
+                    break;
+                } else if (msg.startsWith("BOOT:ERR:")) {
+                    bottomHwOk = false;
+                    bottomErrReason = msg.substring(9);
+                    break;
+                }
+            }
+        }
+        delay(10);
+    }
+
+    if (!uartLinkOk) {
+        allPassed = false;
+        drawPostRow(6, "7. UART Linka", false, "Odpojeny kabel");
+        drawPostRow(7, "8. Spodni panel HW", false, "Nedostupny");
+    } else {
+        drawPostRow(6, "7. UART Linka", true);
+        if (!bottomHwOk) allPassed = false;
+        drawPostRow(7, "8. Spodni panel HW", bottomHwOk, bottomHwOk ? nullptr : bottomErrReason.c_str());
+    }
+
+    // =========================================================
+    // VYHODNOCENÍ VÝSLEDKU POST TESTU
+    // =========================================================
+    if (allPassed) {
+        // Vše v pořádku -> Zelený pruh, podržíme půl vteřiny a startujeme!
+        gfx.fillRect(0, 198, 320, 42, 0x0320); // Tmavě zelený obdélník
+        gfx.drawTextPartial(24, 214, ">> VSECHNY TESTY USPESNE (BOOT OK) <<", ST77XX_GREEN, 0x0320, 1);
+        Serial.println("[POST] Vsechny moduly OK! Prechazim do hlavniho menu za 600 ms...");
+        delay(600); // Půl sekundy pro přečtení uživatelem
+        return true;
+    } else {
+        // Některý modul selhal -> Červený pruh, výstražný tón a čekání na stisk horního tlačítka
+        gfx.fillRect(0, 196, 320, 44, ST77XX_RED);
+        gfx.drawTextPartial(12, 202, "! CHYBA: ZKONTROLUJ ODPOJENY HARDWARE !", ST77XX_WHITE, ST77XX_RED, 1);
+        gfx.drawTextPartial(12, 220, "Stiskni tlacitko TOP pro preskoceni...", ST77XX_YELLOW, ST77XX_RED, 1);
+
+        Serial.println("[POST] CHYBA HARDWARU! Cekam na stisk horniho tlacitka pro preskoceni...");
+
+        // Výstražné pípnutí bzučáku
+        #ifdef PIN_BUZZER
+        digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
+        delay(180);
+        digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+        #endif
+
+        // Čekáme na stisk horního tlačítka (PIN_BTN1 = GPIO 47, sepnuto = LOW)
+        pinMode(PIN_BTN1, INPUT_PULLUP);
+        while (digitalRead(PIN_BTN1) == HIGH) {
+            delay(20);
+        }
+        // Počkáme na uvolnění tlačítka
+        while (digitalRead(PIN_BTN1) == LOW) {
+            delay(20);
+        }
+        delay(150);
+
+        // Odeslat spodnímu panelu povolení ke startu i přes chybu (pokud čekal v chybové smyčce)
+        SerialESP.println("BOOT:START");
+        Serial.println("[POST] Tlacitko TOP stisknuto -> Preskakuji do systemu...");
+        return true;
+    }
 }
