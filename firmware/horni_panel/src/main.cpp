@@ -1454,6 +1454,16 @@ void Task_Display_UI(void *pvParameters) {
                 static float lastAngleY = -999.0f;
                 static float lastAngleZ = -999.0f;
                 static bool lastShock = false;
+                static bool lastJoyBtnGyro = false;
+
+                // Stisk tlačítka joysticku resetuje / vynuluje gyroskop
+                if (data.joyBtn && !lastJoyBtnGyro) {
+                    sensorManager.resetIMUAngles(0.0f, 0.0f, 0.0f);
+                    data = globalState.getSensorData();
+                    needsFullRedraw = true;
+                    Serial.println("[GYRO] Uhly gyroskopu resetovany na nulu tlacitkem joysticku!");
+                }
+                lastJoyBtnGyro = data.joyBtn;
                 
                 // Relativní úhly natočení kufru v jednotlivých osách [stupně]
                 float angX = data.gyroX; // Osa X (naklopení)
@@ -1505,30 +1515,51 @@ void Task_Display_UI(void *pvParameters) {
                     // Vždy čistě obnovíme předělovou čáru
                     gfx.drawLine(120, 0, 120, 239, ST77XX_BLACK);
 
-                    // 2. Překreslení 3D šipek na pravém panelu (Střed CX = 220, CY = 135)
+                    // 2. Překreslení 3D šipek na pravém panelu
                     int cx = 220, cy = 135;
                     gfx.fillRect(121, 1, 198, 238, ST77XX_WHITE); // Smazání pravého plátna
-                    
-                    // A) Modrá šipka (Osa Z - ve výchozím stavu míří NAHORU, rotuje s angZ)
-                    int zLen = 75;
-                    float radZ = (90.0f - angZ) * 0.0174532925f;
-                    int zx = cx + (int)(zLen * cos(radZ));
-                    int zy = cy - (int)(zLen * sin(radZ));
-                    gfx.drawArrow(cx, cy, zx, zy, 15, 0x039F); // Modrá Z
-                    
-                    // B) Červená šipka (Osa X - ve výchozím stavu šikmo VLEVO DOLŮ 145 deg, rotuje s angX)
-                    int xLen = 58;
-                    float radX = (145.0f + angX) * 0.0174532925f;
-                    int xx = cx + (int)(xLen * cos(radX));
-                    int xy = cy + (int)(xLen * sin(radX));
-                    gfx.drawArrow(cx, cy, xx, xy, 14, 0xE986); // Červená X
 
-                    // C) Zelená šipka (Osa Y - ve výchozím stavu šikmo VPRAVO DOLŮ 35 deg, rotuje s angY)
-                    int yLen = 58;
-                    float radY = (35.0f - angY) * 0.0174532925f;
-                    int yx = cx + (int)(yLen * cos(radY));
-                    int yy = cy + (int)(yLen * sin(radY));
-                    gfx.drawArrow(cx, cy, yx, yy, 14, 0x2444); // Zelená Y
+                    // Vyvážená délka šipek (přesně mezi původní a příliš dlouhou)
+                    const int topLen = 72;
+                    const int baseLen = 66;
+
+                    // A) ČERVENÁ ŠIPKA (Osa X / víko kufru):
+                    // - Při otáčení do boku (Yaw) zůstává 100% upevněná a míří kolmo nahoru bez kmitání.
+                    // - Při zavírání kufru (angX) se přetáčí přes předek dolů k nám jako míč (z výšky cy-topLen až do cy+topLen).
+                    // - Pokud je naklopena k nám a současně otočena do boku, vychyluje se do stran.
+                    float radPitch = angX * 0.0174532925f;
+                    float radYaw   = angY * 0.0174532925f;
+                    float radRoll  = angZ * 0.0174532925f;
+
+                    float pitchHeight = cos(radPitch);
+                    float pitchFwd    = sin(radPitch);
+
+                    // Boční složka vzniká náklonem víka k nám + otočením (nebo bočním roll náklonem).
+                    // Při otočení kufru doleva se sklápěné víko sklápí mírně vlevo (-radYaw).
+                    float redSideways = -pitchFwd * sin(radYaw) + pitchHeight * sin(radRoll);
+                    int redX = cx + (int)(topLen * redSideways);
+                    int redY = cy - (int)(topLen * pitchHeight * cos(radRoll));
+
+                    // B) ZELENÁ ŠIPKA (Osa Y - vpravo dole, základna 35°)
+                    // C) MODRÁ ŠIPKA   (Osa Z - vlevo dole, základna 145°)
+                    // Představují základnu kufru na stole:
+                    // - Úhel mezi sebou drží stabilní (žádné divné roztahování či přibližování při sklápění víka).
+                    // - Dynamicky a svižně rotují 1:1 podle otočení kufru doleva/doprava (+angY) a náklonu (-angZ).
+                    float radGreen = (35.0f  + angY - angZ) * 0.0174532925f;
+                    float radBlue  = (145.0f + angY - angZ) * 0.0174532925f;
+
+                    int greenX = cx + (int)(baseLen * cos(radGreen));
+                    int greenY = cy + (int)(baseLen * sin(radGreen));
+
+                    int blueX = cx + (int)(baseLen * cos(radBlue));
+                    int blueY = cy + (int)(baseLen * sin(radBlue));
+
+                    // Vykreslení spodních šipek (základna)
+                    gfx.drawArrow(cx, cy, blueX, blueY, 14, 0x039F);   // Modrá Z (vlevo dole)
+                    gfx.drawArrow(cx, cy, greenX, greenY, 14, 0x2444); // Zelená Y (vpravo dole)
+
+                    // Vykreslení horní červené šipky (víko)
+                    gfx.drawArrow(cx, cy, redX, redY, 15, 0xE986);     // Červená X (víko)
 
                     // Středový černý pivot
                     gfx.fillCircle(cx, cy, 10, 0x2124);
