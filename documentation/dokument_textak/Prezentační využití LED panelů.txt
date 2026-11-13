@@ -1,0 +1,134 @@
+Střední průmyslová škola a Vyšší odborná škola
+Brno, Sokolská, příspěvková organizace
+
+Maturitní práce
+Prezentační využití LED panelů
+
+Studijní obor: Technické lyceum 78 – 42 – M/01
+Školní rok: 2025/2026
+Třída: L4A
+Jméno: Stanislav
+Příjmení: Chlup
+
+
+Obsah
+
+Zadání ................................................................................................................................... 3
+Seznam symbolů a zkratek ................................................................................................... 4
+1 Úvod ............................................................................................................................. 5
+2 Zprovoznění hardwaru displeje .................................................................................... 6
+  2.1 LED panely ............................................................................................................. 6
+  2.2 Napájení ................................................................................................................. 6
+  2.3 Ovládací panel ........................................................................................................ 7
+3 Zprovoznění softwaru displeje .................................................................................... 10
+4 Hry a animace ............................................................................................................. 11
+  4.1 Test displeje .......................................................................................................... 11
+  4.2 Pohyblivý text ....................................................................................................... 12
+  4.3 Conway's Game of Life ......................................................................................... 13
+  4.4 Animace ohně ....................................................................................................... 14
+  4.5 Flappy bird ........................................................................................................... 15
+  4.6 Snake .................................................................................................................... 16
+5 Závěr ........................................................................................................................... 18
+
+
+Zadání
+
+Navrhnout, zprovoznit a naprogramovat prezentační využití LED panelů 16x16, například zobrazením jednoduchých her nebo běžícího textu. Prezentační panely vhodně zakrytovat.
+
+
+Seznam symbolů a zkratek
+
+Zkratky
+Označení    Legenda
+GND         Ground (0 V)
+ALKS        Arduino Learning Kit Starter
+LED         Light Emmitting Diode
+USB         Universal Serial Bus
+devkit      ESP32-DevKitC-V4
+
+
+1 Úvod
+
+Téma LED displeje jsem zvolil, protože mě už delší dobu zajímají staré programy, tehdy limitované hardwarem, a originální a zajímavé postupy, kterých využívaly, aby se s omezeními na dnešní poměry málo výkonného hardwaru co nejlépe vypořádaly.
+
+Podobné podmínky jako starý hardware umožňuje LED displej a mikrokontrolér. Protože jsem si chtěl tyto podmínky zkusit, rozhodl jsem se na LED displej vytvořit několik z těchto programů.
+
+Už z počátku jsem se rozhodl si co nejvíce kódu programu napsat sám rovnou z několika důvodů. Pravděpodobně by bylo mnohokrát jednodušší si programy najít a jenom je zprovoznit tak, aby dobře fungovaly na LED displeji, ale to je z mého pohledu spíš nevýhoda, protože rád poznávám detaily, kvůli kterým může program běžet na co nejslabším hardwaru a provádět různé, byť jen zanedbatelné optimalizace. Zároveň se při psaní algoritmů často dozvím něco nového. Navíc tím, že programy píšu celé, je můžu upravit na míru požadované funkčnosti.
+
+
+2 Zprovoznění hardwaru displeje
+
+2.1 LED panely
+V displeji používám pole diod, jež je složeno z 512 adresovatelných RGB LED [1], využívám dva panely o 16x16 diodách, LED jsou v něm uspořádány v řadě ve tvaru hada. Pro jejich zapojení jsem nejprve použil vývojovou desku ALKS [2]. To fungovalo dobře, ale po určité době panely přestaly reagovat kvůli chybějícím kondenzátorům (1000uF na každý panel) mezi jejich napájením a zemí. Po opravení této chyby začaly panely opět fungovat. Vývojová deska ALKS zbytečně zvyšovala komplexitu zapojení a programu. Jelikož jsem většinu desky nevyužíval, rozhodl jsem se zjednodušit zapojení a použít pouze vývojovou desku ESP32-DevKitC-V4 [3] (dále jen „devkit“). Po testu jsem zjistil, že LED panely potřebují mít na datovém vodiči zvýšené napětí ze 3,3 V, které je schopen dodávat na svých výstupních pinech devkit, na 5 V. Toho jsem docílil zapojením zvyšovače napětí. Tak jsem nahradil jedinou část vývojové desky ALKS, která byla používána. Toto zjednodušení zapojení mi také umožnilo snadnější přístup k většímu množství vstupních a výstupních pinů, což usnadnilo pozdější připojení ovladače s tlačítky.
+
+Do doby přidání externího zdroje byly panely napájeny přes USB přímo z devkitu. Základní problém tohoto zapojení je, že jsem musel opatrně nastavovat jasnost LED, abych nepřekročil maximální dovolené proudy pro USB a devkit, které jsou limitovány na přibližně 0,5A. Na prvotní testy to postačovalo, a i přes využití jen asi 1/25 maximálního jasu bylo vše dobře viditelné. Pro umožnění ovládání LED i na maximálních úrovních jasu jsem přidal zdroj, který dovoluje panely napájet i při plném výkonu. Pro běžné použití je však maximální jas zbytečný a také se během něho diody dost zahřívají. Pro obvyklé použití jsem se proto po určité době testování rozhodl využívat jas panelu v rozsahu asi 0-50 %.
+
+2.2 Napájení
+Pro napájení panelů a devkitu využívám laboratorní zdroj, který je schopen dodávat proud až 40 A, což s velkou rezervou přesahuje hodnoty, kterých v praxi bude panel dosahovat. Zdroj je nastavený na napětí 4,6 V, což může být překvapující vzhledem k jmenovitým napájecím napětím jak panelu, tak devkitu 5 V. Toto napětí se při testech osvědčilo, protože při vyšších napětích než asi 4,8 V panely přestávají fungovat a místo zobrazování požadovaného obrazu náhodně blikají. Při testech jsem zkoušel horní a dolní limity napájecího napětí a ukázalo se, že 4,6 V má dostatečnou rezervu od obou limitních hodnot. Zatímco horní mez limituje LED panel, tak dolní je limitována napětím nutným pro běh mikrokontroléru ESP32 (který je umístěný na devkitu), protože při dalším snižování napětí se jas na panelech jen nepodstatně sníží, zatímco program na mikrokontroléru se může u napětí blízkých limitním samovolně resetovat ve chvíli mírně zvýšeného odběru. Optimální situace by byla, kdyby napájení mikrokontroléru a panelů bylo oddělené a měly jen společnou GND. Toto zapojení by umožnilo použít vhodné napětí pro každou ze součástek. Tento přístup jsem po nějakou dobu používal, a to díky napájení ESP32 přes mikro USB na devkitu. To však vyžadovalo další zdroj napájení a komplikovalo zapojování, proto jsem se rozhodl používat společné napájení, které je sice méně vhodné, ale jednodušší na zapojení a provoz.
+
+2.3 Ovládací panel
+Pro možnost ovládání programů na displeji jsem vytvořil jednoduchý ovládací panel využívající šest mikrospínačů. Model panelu tlačítek byl vymodelován v programu Free CAD [4], který umožnil jednoduché a rychlé vymodelování desky s otvory pro tlačítka. Free CAD jsem zvolil z důvodu mých předchozích zkušeností s vytvářením modelů v tomto programu. Spínače jsou uspořádány tak, aby komfortně umožňovaly například pohyb kursoru po displeji. U animací je panel tlačítek obvykle nevyužit, ale i přesto u některých dovoluje animaci ovládat. Tlačítka mají předurčené intuitivní funkce, ale lze je v programu nastavit pro jakoukoliv akci. Čtyři tlačítka jsou uspořádána tak, aby odpovídala pohybu ve směrech nahoru, dolů, doleva a doprava, a další dvě jsou na speciální akce. Panel je zkonstruován z podložky tištěné 3D tiskem, do které jsou vsazena a vlepena tlačítka v připravených otvorech.
+
+Propojení tlačítek je realizováno na zadní straně desky, což zajistí přístup k tlačítkům neomezovaný potřebnými vodiči. Tlačítka jsou zapojena do mřížky, aby bylo jednodušší jejich zapojení a čtení. Schéma zapojení bylo vytvořeno v simulátoru elektrických obvodů falstad [5]. Tlačítka jsou snímána pomocí 3 vstupních a 2 výstupních vodičů, čímž jsem výrazně omezil velké množství pullup rezistorů, které by byly vyžadovány u tradičního zapojení.
+
+Čtení probíhá tak, že stažením vstupního vodiče na GND vyberu dvojici tlačítek a poté přečtením vhodného výstupního vodiče jsem schopen zjistit stav tlačítka. Toto zapojení je sice jednoduché, ale má i několik nevýhod. První z nich je, že tlačítka se musí číst postupně, což naštěstí, až na malé množství akcí navíc, které musí program provést, nečiní žádné komplikace. Díky obrovské rychlosti GPIO pinů na ESP jsem schopen přečíst všechny spínače téměř okamžitě. Druhý a poměrně výraznější problém je, že se ovládací panel nechová správně při stisku několika tlačítek zároveň. Tento nedostatek by bylo možné vyřešit připojením diod na vodiče, ale vzhledem k tomu, že žádný z programů nevyžaduje současné stisknutí několika tlačítek, jsem se rozhodl tento problém neřešit. Vystačil jsem si tedy se stavem, kdy panel s tlačítky umožňuje se spolehlivě správnou funkností stisknutí pouze jednoho tlačítka v daném okamžiku. Pro některá tlačítka tato limitace neplatí, zatímco u jiných stisknutí dvou způsobuje nesprávné přečtení jejich stavů.
+
+
+3 Zprovoznění softwaru displeje
+
+Pro ovládání LED panelů používám knihovnu SmartLeds [6], která umožňuje přístup k adresovatelným diodám pomocí psaní hodnot do pole a poté zavolání funkci na jejich zobrazení na displej. V programu jsem pak vytvořil virtuální dvoudimenzionální pole barevných hodnot pro snadnější použití v animacích a hrách. Dále jsem vytvořil abstrakci pro vykreslení pole barevných hodnot na displej, která převede toto pole do jednodimenzionálního pole poskytnutého knihovnou. Dále se abstrakce vypořádá s hardwarovými komplikacemi tvořenými pořadím diod na displeji tím, že každou druhou řadu otočí tak, aby byly LED v hadovi vykresleny po řádcích zleva doprava. Nakonec abstrakce zavolá potřebné funkce pro vykreslení. Tento přístup také umožňuje spuštění her a animací nezávisle na platformě, na které běží. Jediným požadavkem je napsání programu, který dvoudimenzionální pole barevných hodnot vykreslí na obrazovku, což mi umožnilo jednoduše vytvořit simulátor displeje na počítači. Simulátor výrazně zjednodušil proces vývoje programů na hry a animace díky odebrané komplexitě ovládání led displeje, tudíž pro vývoj her a animací postačuje počítač se simulátorem a je zaručeno, že se nasimulované programy na skutečném LED displeji budou chovat stejně. Pro další usnadnění psaní programů pro displej jsem implementoval sadu funkcí, které kreslí primitivní tvary jako čáry, obdélníky, trojúhelníky, kruhy apod. do pole barevných hodnot, které je pak vykresleno. Tyto funkce opět umožňují společný způsob kreslení základních tvarů jak v simulátoru, tak na displeji bez nutnosti platformově závislých postupů.
+
+
+4 Hry a animace
+
+4.1 Test displeje
+Test displeje je jednoduchý program, který slouží pro ověření spotřeby pro požadavky na napájení displeje. Je složen ze dvou částí: první, kdy se postupně rozsvěcí každá LED na maximální jas podle jejich indexu tak, že jich při každém obnovení obrazu svítí o jednu více, až se takto rozsvítí celý panel. Tento test byl důležitý pro určení proudových požadavků na zdroj, který panely napájí. Tímto testem byl zjištěn přibližný proud pro napájení diod na plném jasu, který jsem z měření spočítal jako přibližně 36 mA na jednu LED nebo asi 9 A na jeden panel.
+
+Proud potřebný pro rozsvícení celého panelu lze spočítat přepočtem z rozsvícení libovolného množství LED na plný jas. Nejprve vypočteme proud procházející jednou LED a následně vynásobíme množstvím LED v panelu. Tento výpočet bude nepřesný, protože zanedbáváme spotřebu devkitu a řídící elektroniky LED. Chybu lze omezit změřením maximálního počtu LED, které dokáže zdroj změřit.
+
+Z měření jsem zjistil že 96 LED na maximálním jasu vyžaduje proud 3,44 A. Z toho můžeme vypočítat, podle vztahu v Rovnice 4-1 výpočet maximálního proudu, proud vyžadovaný celým panelem (počítám proud pro 2 panely 16x16 i když na obrázku jsou 3 protože jeden bude odstraněn).
+
+I_max = I_LED · N_panel = (I_zap / N_zap) · N_panel = (3,44 A / 96) · 512 = 18.3 A
+Rovnice 4-1 výpočet maximálního proudu
+
+Druhá část testovacího programu slouží především k testu jasu displeje. V druhé části testovacího programu jsou úrovně jasu na všech LED stejné, ale postupně se zvyšují. Tento test byl užitečný rovnou z několika důvodů. Jedním z nich je určení úrovně jasu, kterou jsem se později rozhodl používat pro ostatní hry a animace.
+
+Základními parametry pro výběr vhodné jasové úrovně byl vysoký jas, který ale nebude bránit rozpoznatelnosti jednotlivých pixelů, dále proud, který panely vyžadují na napájení a míra zahřívání LED při běhu. Maximální jas není vhodný z důvodu všech tří těchto parametrů, panely svítí takovou měrou, že pozorovatele oslňují a nejsou dobře čitelné, proudové požadavky jsou vysoké a LED se výrazně zahřívají při delším provozu. Po těchto testech jsem se rozhodl používat jako maximum místo úrovní 0-255, kterou umožňují LED, pouze úrovně 0-100. To přispělo k přívětivému škálování jasu v procentech. Zároveň se displej téměř nezahřívá a lze ho používat po dlouhou dobu bez přerušení.
+
+4.2 Pohyblivý text
+Jedná se o animaci zobrazující text zadaný v programu na displeji formou pohyblivého okna zobrazující postupně celý text. Původně program fungoval na principu zobrazování obrázku, který byl 16 pixelů vysoký a širší než displej. Přes obrázek se posunovalo okno 32 sloupců. Obrázek se opakoval, aby vždy na svém konci opět začínal. Velkou nevýhodou tohoto přístupu byla obtížnost vytváření obrázku zpracovávaného programem a převod textu do formy obrazu. Program vyžadoval velmi specifický formát dat obrázku, což mě přivedlo k napsání nástroje na převod běžných obrázků do této podoby. I přes využití tohoto nástroje byly jakékoliv změny ve zobrazovaném textu velmi náročné a zároveň obraz musel být celý uložen na mikrokontroléru. Proto jsem se rozhodl změnit základní princip tohoto programu a místo obrázku převádět do formy obrazu běžný text. To výrazně zjednodušilo možnost tento text měnit. Místo obrazu obsahující kompletní text jsem vytvořil jednoduchý font pro převedení písmen na obraz. Program za běhu projde text po písmenech a podle tabulky s fontem si najde, jak se každé písmeno má zobrazit. Tento přístup má oproti dříve zmíněným obrázkům podstatnou nevýhodu v tom, že není schopen zobrazit žádný znak, který v tabulce nenajde. Tato metoda je příčinou omezení, způsobující schopnost zobrazit pouze znaky, které font definuje, což je v mém případě pouze základní abeceda. Pomocí programu zobrazující text jsem na displeji udělal pohybující se text s názvem školy.
+
+4.3 Conway's Game of Life
+V této části své práce jsem se zabýval implementací velmi známe animace - hry života [7]. Program se animací snaží napodobit chování velmi jednoduchých živých buněk a dosahuje toho řízením se několika jednoduchými pravidly. Základem je libovolně velká plocha vybraná pro simulaci. Já jsem použil plochu 16x32, shodnou s rozměry displeje, abych byl schopen celou simulaci zobrazit. Každá LED reprezentuje jednu buňku, která je buď živá nebo mrtvá (v programu reprezentovaná jako 1 nebo 0). V následujícím obrazu se provede pro každou buňku ověření pravidel a podle toho může buňka zůstat mrtvá, ožít, umřít nebo zůstat živá. Tato pravidla se řídí počty sousedících živých buněk, které jsou počítány jak ve vodorovném a svislém směru, tak v diagonálách. Sousedící buňky jsou každé dvě buňky, které se dotýkají buď stranou nebo rohem. Tato mřížka buněk je též implementována tak, aby její horní strana navazovala na spodní a levá strana na pravou. Díky této vlastnosti vypadá mřížka, i když malá, větší a u některých skupin buněk, které se v čase pohybují nějakým směrem, umožňuje lepší zobrazení jejich pohybu. Místo toho, aby se dostaly k okraji a umřely tak projdou na druhou stranu prostoru a jejich pohyb je snadno pozorovatelný.
+
+Pravidla pro tuto simulaci jsou následující:
+1. Jakákoliv živá buňka s méně než 2 živými sousedy umírá.
+2. Jakákoliv živá buňka s 2 nebo 3 živými sousedu zůstává živá.
+3. Jakákoliv živá buňka s více než 3 živými sousedy umírá.
+4. Jakákoliv mrtvá buňka s přesně 3 živými sousedy ožívá.
+
+Tato pravidla jsou často v implementacích jako v tomto případě zjednodušena na dvě. První z nich říká, že buňka se 3 sousedy je nastavena na 1 (živá). Druhé je, že buňka z méně než 2 a více než 3 sousedy je nastavena na 0 (mrtvá). Všechny ostatní mají stav zachovaný minulého stavu. To je v programu implementováno tím, že na buňce není provedena žádná akce.
+
+Navíc jsem k této simulaci přidal možnost, aby se uživatel mohl pohybovat po ploše a nastavovat stav jednotlivých buněk manuálně. Aktuálně vybraná buňka je zvýrazněna kursorem (čtyřmi červenými body), který se tlačítky pohybu posouvá po displeji a dalším tlačítkem je možné invertovat aktuální stav vybrané buňky. Během nastavování je simulace pozastavena, a tudíž umožňuje vytvoření libovolného stavu před opětovným spuštěním simulace stisknutím tlačítka. K pozastavení simulace dojde automaticky při jakémkoliv pohybu nebo stisknutím tlačítka pro invertování buňky ale její znovuspuštění je možné pouze stisknutím posledního tlačítka.
+
+4.4 Animace ohně
+Tento program má za cíl vytvořit a vykreslit snímky animovaného ohně. Z důvodu omezení paměti mikrokontroléru by nebylo vhodné používat tradiční formu animace, kde je vytvořeno množství obrázků zachycující oheň v daném čase. Tudíž jsem se rozhodl se inspirovat řešeními častými u starších herních konzolí [8], které měly podobné limitace. Oproti tradičnímu ukládání snímků animace a poté jejich načítání a vykreslování používají procedurálně generované animace, které mají výrazně nižší požadavky na omezenou paměť. Procedurálně generované animace používají často jen množství paměti na uložení jednoho snímku nebo v některých případech dvou, které se pro vykreslení dalšího snímku prohazují, aby nedocházelo k viditelnému postupnému překreslování daného snímku. Využívají dat uložených v předchozím snímku přímo pro generaci snímku následujícího. Pro animaci ohně jsem sestavil algoritmus, který vypočítá teplotu každého pixelu ohně, a tu pak podle tabulky převede na barvu a vykreslí ji. Na začátku je definovaná teplota pixelů dole uprostřed obrazovky na maximální, pak se cyklem projde každý pixel a z teploty jeho sousedících pixelů se vypočte jeho nová teplota. Výpočet této nové teploty spočívá v tom, že nejvíce teploty předávají pixely pod aktuálně vyhodnocovaným, menší váhu pak mají pixely horizontálně od něj a nejmenší vliv mají ty nad ním. Nakonec je tato teplota vynásobena náhodným koeficientem různým pro každou z těchto skupin. Velikostí koeficientů určuje, jak dobře se simulovaný oheň bude šířit do daných směrů. Koeficienty mají zpravidla velikost od 0 do 1. Překročením hodnoty 1 by mohlo docházet k jevům, kde by spodní pixel předal hornímu větší teplotu, než je jeho sama a tím by docházelo k nekontrolovanému zvyšování teploty s postupem nahoru a plamen by tak nevypadal realisticky. Je možné pozměnit i koeficienty napravo od koeficientů nalevo, čímž docílíme vizuálního efektu jako kdyby do ohně foukal vítr z některé strany. Nastavováním koeficientů je možné upravovat tvar a styl ohně mezi velkým množstvím možností. Po zvolení vhodných koeficientů jsem byl schopen vytvořit realisticky vypadající animaci ohně.
+
+4.5 Flappy bird
+Jedná se o zjednodušenou implementaci velmi známé hry Flappy bird [9]. V této hře je cílem se co nejdéle vyhýbat přicházejícím překážkám, které v této hře přicházejí zleva doprava. Za každou překážku, které se hráč úspěšně vyhne (pohybem nahoru a dolů) získává bod. Ve chvíli, kdy se jí nevyhne a do překážky narazí, hra končí a skóre se začíná počítat opět od nuly. Vzhledem k velmi omezenému rozlišení displeje je hráč, který je v originále obrázkem ptáka, znázorněn pouze jediným žlutým pixelem a překážky, které jsou podle originálu sloupy tvořené z trubek s mezerou mezi sebou, jsou znázorněny jako svislá řada pixelů zelené barvy. Stisknutím tlačítka se hráč rozletí nahoru, a pak pomalu díky gravitaci znovu padá, a pokaždé se musí vyhnout přibližujícím se sloupům.
+
+Sloupy jsou generovány v pravidelných intervalech s konstantně velkým otvorem v náhodné výšce. Pokud se hráč dotkne spodního okraje obrazovky, považuje to hra též jako prohru, to symbolizuje naražení do země. Oproti tomu, nad horní okraj obrazovky může hráč letět, jak vysoko chce, ale otvor ve sloupu je vždy v rámci výšky obrazovky, proto když se hráč nachází nad ní a sloup se přiblíží k jeho pozici, tak opět hra končí, protože hráč narazil do sloupu. I přes to, že sloup není nad obrazovkou vidět, tak pokračuje nekonečně vysoko. V mé implementaci se na pravém okraji počítá hráčovo skóre, a to pomocí LED, které v binárním čísle ukazují aktuální počet překonaných překážek. Číslo je čteno shora dolů a bílé pixely znázorňují jedničku, zatímco tmavé pixely znázorňují nulu. Tento způsob jsem zvolil, protože tradiční čítač skóre v desítkové soustavě by zabíral velké množství prostoru na obrazovce. Proto jsem se rozhodl navzdory obtížnosti čtení využít dvojkovou soustavu.
+
+4.6 Snake
+Dalším programem, který jsem pro displej napsal je hra Snake (známá z telefonů Nokia [10]). V této hře je cílem nasbírat co největší množství bodů. Hráč ovládá hada, který se pohybuje neustále po obrazovce dopředu. Body je možné získat tím že hlavou hada se dostaneme na pozici jablka (na obrazovce reprezentováno červeným bodem). Na začátku hry má had definovanou počáteční délku a po získání bodu se o 1 prodlouží. Had se pohybuje tak, že hráč může pomocí tlačítek ovládacího panelu určit jakým směrem se chce pohybovat a v pravidelných intervalech se hlava hada (první pixel jeho těla) posune ve směru který hráč tlačítkem zvolil a pokračuje v tomto směru, dokud není stisknuto jiné tlačítko. Zbytek těla hada se pohybuje postupně po trase, kde byla hadova hlava. To znamená, že hlava se posune ve směru pohybu, první pixel za hlavou se posune na místo hlavy a každý následující pixel těla hada se posune na místo pixelu o jedna blíž ke hlavě hada. Pokud by se hlava hada měla posunout na pixel, na kterém už je tělo hada, hra končí. K tomu však nedojde, pokud je to poslední pixel těla hada, protože se posune ve stejnou chvíli dále a nepřekáží hlavě v pohybu. Obvyklé jsou dvě verze této hry. Jedna je, že pokud by se hráč měl hlavou hada dostat mimo obrazovky, tak had opět umře a hra končí. Já osobně preferuji druhou verzi, kde se propojí levá a pravá strana a horní a spodní strana panelu, což vytvoří volnější prostor pro pohyb. Proto jsem si tuto variantu vybral a implementoval. V této verzi hry Snake platí, že pokud by hráč měl hlavou vyjet mimo obrazovku na pravém okraji objeví se na levém okraji ve stejném řádku obdobně to funguje pro všechny směry. Při přejíždění přes okraj ale stále platí to, že hráč nesmí hlavou najet na vlastní tělo, které je na druhém okraji displeje.
+
+
+5 Závěr
+
+LED displej se mi podařilo zprovoznit a naprogramoval jsem na něj hry Snake a Flappy Bird, animaci ohně a simulaci Game of Life. Displej byl už během tvorby využíván k prezentačním účelům na dnech otevřených dveří a bude jej možno takto využívat i v budoucnu.
+
+Při zprovozňování zapojení displeje jsem objevil mnoho míst, kde došlo k problémům a tyto nabyté znalosti mi pomohou se těmto problémům v budoucnu u dalších projektů vyvarovat. Příkladem těchto komplikací je například problém s LED panely, kde je pin na napájení označený jako 5 V, ale přivedením tohoto napětí panely přestanou fungovat, protože potřebují napětí o několik desetin voltu nižší.
+
+Vytváření programů pro displej mi výrazně usnadnilo vytvoření softwarové simulace funkce displeje přímo na počítači. Simulátor mi pomohl rychle odladit chyby ve hrách a simulacích, aby se chovaly podle mých požadavků. Propojení hardwarové a softwarové části této práce probíhalo také hladce. Po zprovoznění v simulátoru a odladění platformově závislé části programu na mikrokontroléru fungovaly hry a animace i na fyzickém displeji bez jakýchkoliv úprav.
+
+Během zprovozňování hardwaru jsem zkusil několik cest, ale nakonec jsem se snažil vybrat tu nejjednodušší. Proto i přes počáteční výhody využití ALKS, který přinesl už funkční základ pro ovládání panelů jsem se rozhodl pro jednodušší zapojení bez této vývojové desky.

@@ -1,0 +1,19 @@
+- opravit sipky gyro
+- napsat ten text
+- proplatit burda
+- barevy ty ty
+- nejake mereni kolik to zere at je trochu elektra
+- zdroj
+- opravit ten linearni posun
+- dokumentace mod
+- mozna vylepsit hlavni vizualne
+- vyrezat popisky
+- qr kod 
+- nfc tag --> odkaz na repo
+- mozna nejakej autonomni mod na prepinani pro ukazky
+- vice telefonu a jak s nima funguje ta vzdalenost a detekce
+- info mody dodelat
+- vymislet to pipani bzucaku treba podkres ke hram..
+- mozna nejaky mod zarovky(svetla) vzhledem k tem fotodiodam
+- nejake readme na githubu hezke
+- 

@@ -1,0 +1,177 @@
+Střední průmyslová škola a Vyšší odborná škola
+Brno, Sokolská, příspěvková organizace
+
+Maturitní práce
+Měření a analýza dat s využitím ESP32
+
+Studijní obor: Technické lyceum 78 – 42 – M/01
+Školní rok: 2025/2026
+Třída: L4A
+Jméno: Vojtěch
+Příjmení: Fitz
+
+
+Obsah
+
+Zadání ................................................................................................................................... 4
+Seznam symbolů a zkratek ................................................................................................... 5
+1 Úvod ............................................................................................................................. 6
+2 Výběr součástek ........................................................................................................... 7
+  2.1 Senzory teploty ........................................................................................................ 7
+    2.1.1 LM75AD ........................................................................................................... 7
+  2.2 Senzory tlaku ........................................................................................................... 7
+    2.2.1 BMP180 ............................................................................................................ 7
+    2.2.2 BMP280 ............................................................................................................ 7
+  2.3 Senzory vlhkosti ...................................................................................................... 8
+    DHT 11 ........................................................................................................................ 8
+3 Sestavení ....................................................................................................................... 9
+  3.1 Návrh schématu ...................................................................................................... 9
+  3.2 Zapojení ................................................................................................................ 10
+  3.3 Návrh krabičky ..................................................................................................... 10
+4 Software ..................................................................................................................... 12
+  4.1 Programovací prostředí ......................................................................................... 12
+  4.2 Základní koncept fungování mého programu ........................................................ 12
+  4.3 Ukládání dat ze senzoru ........................................................................................ 12
+  4.4 Čtení dat ze senzorů .............................................................................................. 13
+    4.4.1 LM75AD ......................................................................................................... 13
+    4.4.2 BMP180 .......................................................................................................... 13
+    4.4.3 BMP280 .......................................................................................................... 13
+    4.4.4 DHT11 ............................................................................................................ 14
+  4.5 Web server ............................................................................................................ 14
+  4.6 Generace grafu ...................................................................................................... 14
+  4.7 Užívání ................................................................................................................. 15
+5 Závěr ........................................................................................................................... 16
+
+
+Zadání
+
+Navrhnout, sestavit a naprogramovat zařízení, které samostatně čte data ze senzorů, analyzuje je a zobrazuje je on-line s využitím čipu ESP32.
+
+
+Seznam symbolů a zkratek
+
+Symboly
+Označení    Legenda    Jednotka
+U           Napětí     [V]
+T           teplota    [°C]
+p           tlak       [Pa]
+φ           vlhkost    [%]
+
+Zkratky
+Označení    Legenda
+USB         Universal serial bus
+SVG         Scaleble vector graphics
+
+
+1 Úvod
+
+V dnešní době, kdy je kladen důraz na okamžitou dostupnost informací a schopnost předvídat události ještě předtím, než nastanou, se kvalitní a rychle získaná data stávají klíčovým faktorem ovlivňujícím výslednou efektivitu jakéhokoli projektu. Aby však měla data skutečnou hodnotu, je nezbytné je správně zpracovat a převést do přehledné a srozumitelné podoby – nikoli je pouze shromažďovat bez jasného významu.
+
+Na základě toho jsem si pro závěrečnou práci zvolil téma měření a analýzy dat s využitím platformy ESP32-DevKitC-V4 [1] (dále jen ESP32). K tomuto rozhodnutí mě vedl dlouhodobý zájem o senzory, mikrokontroléry, software a dále také zájem o tvorbu webových stránek. Od zpracování této práce očekávám prohloubení znalostí o fungování různých typů senzorů, pochopení komunikace s nimi a získání praktických zkušeností s prací s daty přímo na mikrokontroléru ESP32.
+
+Cílem této práce je vybrat vhodné fyzikální veličiny a určit odpovídající senzory pro jejich měření, navrhnout jejich funkční zapojení, sestavit měřicí zařízení a naprogramovat čip ESP32 tak, aby dokázal ze senzorů získávat data, dále je zpracovávat a zpřístupňovat prostřednictvím webového rozhraní.
+
+
+2 Výběr součástek
+
+Prvním krokem při výběru součástek bylo rozhodnout, jaké fyzikální veličiny budou senzory měřit. Zvolil jsem měření základních fyzikálních veličin prostředí – konkrétně teploty, tlaku a vlhkosti vzduchu. Uvažoval jsem i o dalších možnostech, avšak ty byly buď příliš specifické, nebo velmi nepraktické z hlediska měření.
+
+2.1 Senzory teploty
+Senzorů pro měření teploty existuje velké množství a liší se v řadě parametrů – přesnosti, sběrnici, způsobu připojení, tvaru, i dalších vlastnostech. Zvolil jsem senzor LM75AD, a to zejména kvůli jeho nízké ceně a dobré dostupnosti.
+
+2.1.1 LM75AD
+LM75AD je digitální teplotní senzor společnosti NXP, který umožňuje měření v rozsahu od –55 °C do 125 °C s rozlišením 0,125 °C. Je integrován v kompaktním pouzdře SOIC 8 a pracuje při napájecím napětí 2,7 V až 5,5 V, což usnadňuje jeho použití v různých typech elektronických zařízení. Komunikace se senzorem probíhá prostřednictvím sběrnice I²C. Díky třem adresovacím pinům je možné na jednu I2C sběrnici připojit až osm těchto senzorů současně. [2]
+
+2.2 Senzory tlaku
+Výběr tlakových senzorů není sice tak široký jako u senzorů teploty, přesto je nabídka dostatečná a umožňuje volit mezi několika kvalitními variantami. Zvolil jsem dva senzory společnosti Bosch pro jejich vysokou spolehlivost. Vybral jsem odlišné modely, aby bylo možné porovnat jejich vlastnosti.
+
+2.2.1 BMP180
+BMP180 představuje senzor s měřicím rozsahem 300–1100 hPa a přesností až 0,02 hPa. Obsahuje také teplotní senzor, který je nezbytný pro výpočet tlaku. Komunikace se senzorem probíhá při napětí 1,8–3,6 V prostřednictvím sběrnice I2C. Na jednu sběrnici lze připojit pouze jeden tento senzor, nedá se změnit jeho adresa. [3]
+
+2.2.2 BMP280
+BMP280 je novější senzor, který oproti BMP180 nabízí vyšší přesnost, má stejné funkční rozmezí tlaku i napětí, avšak rozšiřuje možnosti komunikace – kromě sběrnice I2C podporuje také rozhraní SPI. V režimu I2C umožňuje připojit na jednu sběrnici až dva senzory. Disponuje přesnějším teplotním čidlem a umožňuje vyšší vzorkovací frekvenci. [4]
+
+2.3 Senzory vlhkosti
+Ve srovnání s teplotními a tlakovými senzory je nabídka senzorů vlhkosti užší, přesto však dostatečná pro běžné aplikace. Zvolil jsem senzor DHT11 od společnosti OSEPP, a to zejména díky jeho jednoduché dostupnosti.
+
+DHT 11
+DHT11 je kombinovaný senzor vlhkosti a teploty pro měření v rozsahu 20–80 % relativní vlhkosti a 0–50 °C. Lze jej provozovat při napájecím napětí 3,3 V nebo 5 V. Čtení dat probíhá digitálně prostřednictvím vlastního komunikačního protokolu senzoru a vyžaduje pouze jeden pin. [5]
+
+
+3 Sestavení
+
+Po výběru všech součástek jsem přistoupil k dalšímu kroku, kterým bylo jejich sestavení a zapojení pro testování. Před samotnou montáží však bylo nutné připravit návrh zapojení a postupovat podle něj.
+
+3.1 Návrh schématu
+Situace v oblasti napájení senzorů je poměrně jednoduchá, protože všechny zvolené senzory pracují při napětí 3,3 V. Vzhledem k tomu, že všechny senzory kromě DHT11 podporují komunikaci přes sběrnici I2C, rozhodl jsem se ji využít jako „hlavní“ sběrnici, pro senzor DHT11 pak jeho specifický protokol na samostatném pinu.
+
+Datová komunikace rovněž probíhá na úrovni 3,3 V, což je dáno tím, že senzory napájené tímto napětím obvykle používají stejnou úroveň i pro datové piny – tuto skutečnost jsem ověřil v datasheetech jednotlivých senzorů. Tam, kde sběrnice vyžadovala pull up rezistor, jsem využil interní pull-upy v mikrokontroléru ESP32.
+
+U teplotních senzorů je výstupní pin připojen přímo na vstupní pin ESP32. Pro zjednodušení zapojování jsem si nejprve vytvořil schéma zapojení a následně podle něj jednotlivé součástky postupně spojil.
+
+3.2 Zapojení
+Nejprve jsem jednotlivé senzory zapojil samostatně, abych ověřil jejich funkčnost a správnou komunikaci. Následně jsem je zapojil dohromady do jednoho celku. U senzorů vybavených piny jsem využil jejich standardní vývody; u ostatních bylo nutné nejprve připájet vodiče přímo k jejich kontaktům. Po pečlivé kontrole celého zapojení se ukázalo, že všechny senzory pracují správně a komunikace probíhá bez problémů.
+
+3.3 Návrh krabičky
+Po složení všech součástek nevypadala maturitní práce příliš esteticky, a proto jsem se rozhodl vytvořit pro celý systém vlastní krabičku. Pro její návrh jsem zvolil program FreeCAD, ve kterém jsem navrhl dvoudílnou konstrukci. Spodní část tvoří dutý kvádr bez horní stěny, doplněný o přesně umístěné výřezy na horních hranách, které umožňují přesné spasování s horním dílem. Horní část je tvořena deskou s otvory pro jednotlivé senzory a okrajem navrženým tak, aby pevně dosedal do spodního dílu. [6]
+
+Krabičku jsem následně vytiskl na 3D tiskárně. Ke všem součástkám jsem připájel vodiče a upevnil je k hornímu víku. Na jeho spodní stranu jsem přidal rozvodné vodiče, ke kterým jsem nejprve připojil samotné ESP32 a následně i jednotlivé senzory. U každého senzoru jsem zkrátil vodiče na přesnou délku tak, aby odpovídala jeho umístění v krabičce.
+
+
+4 Software
+
+4.1 Programovací prostředí
+Pro programování jsem se rozhodl využít vývojové prostředí ESP IDF (dále jen „prostředí“). Jedná se o prostředí od společnosti Espressif, výrobce mikrokontroléru ESP32. Prostředí poskytuje rozsáhlou sadu knihoven – například pro Wi Fi, Bluetooth, I2C, SPI, HTTP protokoly a mnoho dalších funkcí. ESP IDF je kompatibilní se všemi běžně používanými operačními systémy na osobních počítačích a lze jej integrovat také jako rozšíření do vybraných editorů. Programování probíhá v jazyce C a prostředí umožňuje sledovat výstup programu v reálném čase. [7]
+
+4.2 Základní koncept fungování mého programu
+Jako výchozí základ programu jsem použil ukázku z prostředí s webovým serverem. Ten jsem následně upravil tak, aby odpovídal požadované struktuře a doplnil jsem jej o část ukázky, která zajišťuje připojení k Wi Fi síti. Do programu jsem také přidal potřebné knihovny a funkce pro správnou inicializaci sběrnice I2C. Následně jsem program rozdělil na dva hlavní procesy: proces určený pro komunikaci se senzory a proces zajišťující chod webového serveru a odesílání naměřených dat.
+
+4.3 Ukládání dat ze senzoru
+Uložená data představují jediný komunikační kanál mezi hlavními procesy, proto je nezbytné, aby byla tato část implementace maximálně robustní. Pro ukládání hodnot ze senzorů jsem vytvořil vlastní datovou strukturu, která obsahuje pole naměřených hodnot, informaci o jeho délce, název senzoru a barvu použitou pro zobrazení v grafu. Každá měřená veličina každého senzoru má svou vlastní strukturu.
+
+Na začátku programu jsou struktury inicializovány s počátečními hodnotami jednotlivých senzorů, pak se mění pouze naměřená data a jejich množství. Pokud je množství uložených hodnot příliš velké (přesáhne stanovenou mez), provede se zprůměrování dvou sousedních hodnot, čímž se celkový počet uložených dat sníží na polovinu. Aby zůstala zachována jednotná vzorkovací frekvence u všech dat, je zároveň úměrně (na polovinu) snížena i frekvence samotného měření.
+
+4.4 Čtení dat ze senzorů
+Ke každému senzoru jsem vytvořil samostatnou funkci, která provádí načtení dat a jejich zápis do globální datové struktury. U senzorů, které to vyžadují, jsou na začátku programu načtena jejich kalibrační data. Pokud je připojeno více stejných senzorů na jedné sběrnici, obsahuje příslušná funkce jako parametr konkrétní datovou strukturu daného senzoru.
+
+4.4.1 LM75AD
+Čtení dat z tohoto senzoru je poměrně jednoduché. Senzor ve výchozím stavu průběžně měří teplotu a aktualizuje svou interní paměť, takže stačí jen přečíst data pomocí sběrnice I2C, provést základní úpravu dat a zapsat je do datové struktury daného senzoru.
+
+Senzor umožňuje nastavit teplotu, při které se mění stav jediného výstupního pinu (tzv. over temperature shutdown). Tuto funkci v programu nevyužívám, ale pin je připojen, aby mohl být v případě potřeby použit.
+
+4.4.2 BMP180
+U tohoto senzoru je postup složitější. Na začátku programu je nutné načíst kalibrační data, která jsou do paměti senzoru zapsána výrobcem a jsou u každého senzoru jiná. Při používání senzoru je možné nastavit režimy jeho fungování nebo lze pracovat s výchozí konfigurací. Využil jsem výchozí nastavení. Pro provedení jednotlivého měření je třeba přes sběrnici I2C specifikovat, zda chceme provést měření teploty nebo tlaku. Po odeslání požadavku je potřeba vyčkat přibližně 10 ms, než se dají přečíst změření hodnoty ze senzoru. Tento postup je nutné provést jak pro tlak, tak pro senzor teploty integrovaný v čipu. Po načtení dat je potřeba provést úpravu formátu a dále k nim připočítat všechny kalibrační koeficienty v přesném postupu uvedeném v datasheetu výrobce. Po provedení všech výpočtů už stačí vypočtenou teplotu i tlak uložit do jejich příslušných datových struktur.
+
+4.4.3 BMP280
+U tohoto senzoru je situace složitější než u předchozího modelu, protože se jedná o novější zařízení s mnohem širšími možnostmi nastavení. Mezi klíčové kroky patří hardwarová konfigurace (nastavení provozního režimu) a nastavení adresy na sběrnici I2C. Získávání dat probíhá podobně jako u BMP180, samotný výpočet výsledných hodnot s použitím kalibračních koeficientů je o něco jednodušší. Tento senzor nabízí celou řadu pokročilých funkcí, jako je režim spánku a možnost měřit v nastavitelných cyklech.
+
+4.4.4 DHT11
+DHT11 funguje na samostatné sběrnici (datovém pinu). Pro zahájení měření je potřeba mu vyslat specifický signál, na který senzor odpoví naměřenými hodnotami. Po přečtení dat se provede zpracování formátu a hodnoty se uloží do příslušné datové struktury (vlhkosti a teploty).
+
+4.5 Web server
+Webový server běží na mikrokontroléru ESP32 v samostatném procesu na pozadí a zpřístupňuje jedinou webovou stránku. Ta obsahuje grafy naměřených dat ze všech senzorů a informaci o tom, jak dlouhá historie měření je právě zobrazena.
+
+4.6 Generace grafu
+Aby bylo možné zobrazit naměřená data přehledněji než ve formě velkého množství čísel, rozhodl jsem se vytvořit graf v podobě SVG [8] souboru. Proces vytváření grafu je poměrně složitý, lze jej rozdělit do několika základních kroků. Výstup se zapisuje do textového řetězce, který je obsažen ve webové stránce, kterou dostane koncový uživatel.
+
+Prvním krokem je zapsání standardizovaného textového řetězce, který se píše pokaždé a umožňuje univerzální přečtení dat. Poté jsou do výstupu přidány čáry tvořící ohraničení grafu. Tím je příprava pro vykreslení dat hotova.
+
+Aby byla data dobře čitelná, naškálují se pro každou veličinu tak, aby její minimální a maximální hodnota tvořily minimum a maximum v grafu. Postup je následující: přečte se první hodnota a nastaví se jako počáteční minimum i maximum. Následně se porovnává s každou další hodnotou – pokud je některá nižší nebo vyšší než dosavadní minimum či maximum, tato hodnota je nahrazena. Tento proces se provede pro všechny senzory, které měří danou veličinu. Výsledné minimum a maximum se uchovají pro další výpočty a zároveň se na jejich základě do grafu přidá popsaná stupnice.
+
+Dalším krokem je samotné vykreslování dat. Pro senzor, jehož hodnoty se mají v daném okamžiku vykreslit, se měřené vzorky přepočítají tak, aby odpovídaly zvolené stupnici v grafu. Každý datový bod je pak převeden na souřadnici a zapsán jako část čáry grafu. Barva této čáry je určena přímo v datové struktuře konkrétního senzoru. Po dokončení obou kroků pro všechny hodnoty je přidána stupnice času, která je vypočtena z počtu proběhlých měřicích cyklů a délky cyklu. Posledním krokem je doplnění povinných součástí standardu souboru SVG a data jsou odeslána přes web k uživateli. Uživatel si může data prohlédnout v grafu.
+
+4.7 Užívání
+Pro správné použití je nejprve potřeba ESP32 nakonfigurovat pro připojení k Wi Fi síti a připojit jej k napájení přes USB. ESP32 se samostatně připojí Wi Fi, inicializuje všechny senzory a začne shromažďovat naměřená data.
+
+Uživatel pak jednoduše v internetovém prohlížeči zařízení připojeného ke stejné Wi Fi síti zadá IP adresu ESP32. Následně se mu zobrazí webová stránka obsahující data od okamžiku spuštění až do současnosti. Pokud chce uživatel zobrazit aktuálnější hodnoty, stačí stránku znovu načíst.
+
+
+5 Závěr
+
+Má ročníková práce byla zaměřena na návrh a realizaci kompaktního zařízení obsahujícího sadu senzorů připojených k platformě ESP32. Na začátku jsem měl k dispozici pouze samotné ESP32 a teoretickou zkušenost s jeho programováním. Prvním krokem proto bylo naučit se pracovat ve vývojovém prostředí pro ESP32 a osvojit si samotné programování. Tento proces mi zabral výrazně více času, než jsem původně očekával. Zahrnoval postupný přechod od jednoduchého nahrávání ukázkových kódů přes přijímání a zpracování dat až po nastavování výstupních pinů a práci se základními knihovnami.
+
+Cílem práce bylo vytvořit zařízení, ve kterém bude ESP32 pevně spojeno se senzory, doplnit jej jednoduchým softwarem a především vše uvést do stabilního stavu bez častých chyb. To vyžadovalo mnoho hodin testování, ladění a oprav — jak v kódu, tak v hardwaru. Během práce jsem získal cenné zkušenosti nejen s vyhledáváním a opravou chyb, ale také s tím, jak i zdánlivě drobná nepřesnost či chyba může způsobit neočekávané problémy v úplně jiné části programu.
+
+Přestože byla práce časově náročná a dopustil jsem se řady chyb, celý proces mě výrazně posunul kupředu. Naučil jsem se komplexně přemýšlet o propojení hardwaru a softwaru, lépe porozuměl fungování senzorů a rozšířil si své znalosti v oblasti elektroniky, programování i technického návrhu. Tato zkušenost pro mě byla velmi cenná a pomohla mi otevřít nové obzory do budoucího studia i praktických projektů.
+
+Podařilo se mi tedy vyrobit sestavu měřicích senzorů, která jich obsahuje celkem 5, jejich výstup je dále zobrazován na webu. Tím se mi povedlo splnit zadání.
