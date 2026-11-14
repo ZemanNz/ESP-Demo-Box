@@ -103,14 +103,21 @@ void GraphicsManager::drawPacmanGauge(int cx, int cy, int radius, float percent,
     // 1. Podkladový kruh
     tft.fillCircle(cx, cy, radius, bgColor);
 
-    // 2. Zaplnění koláčového výseku (Pac-man tělo)
+    // 2. Naprosto plné, 100% neprůhledné vyplnění koláčového výseku (vyplněné trojúhelníky)
     int maxAngle = (int)(percent * 360.0f);
-    if (maxAngle > 0) {
-        for (int deg = 0; deg <= maxAngle; deg += 3) {
-            float rad = (deg - 90) * 0.0174532925f; // Začátek nahoře na 12 hodinách (-90 deg)
-            int x = cx + (int)(radius * cos(rad));
-            int y = cy + (int)(radius * sin(rad));
-            tft.drawLine(cx, cy, x, y, activeColor);
+    if (maxAngle >= 360) {
+        tft.fillCircle(cx, cy, radius, activeColor);
+    } else if (maxAngle > 0) {
+        float prevRad = -90.0f * 0.0174532925f;
+        int prevX = cx + (int)(radius * cos(prevRad));
+        int prevY = cy + (int)(radius * sin(prevRad));
+        for (int deg = 1; deg <= maxAngle; deg++) {
+            float rad = (deg - 90) * 0.0174532925f;
+            int currX = cx + (int)(radius * cos(rad));
+            int currY = cy + (int)(radius * sin(rad));
+            tft.fillTriangle(cx, cy, prevX, prevY, currX, currY, activeColor);
+            prevX = currX;
+            prevY = currY;
         }
     }
 
@@ -119,12 +126,12 @@ void GraphicsManager::drawPacmanGauge(int cx, int cy, int radius, float percent,
 }
 
 void GraphicsManager::drawWifiIcon(int cx, int cy, uint16_t color, uint16_t bgColor) {
-    tft.fillCircle(cx, cy, 3, color);
-    tft.drawCircle(cx, cy, 10, color);
+    tft.fillCircle(cx, cy, 2, color);
+    tft.drawCircle(cx, cy, 6, color);
+    tft.drawCircle(cx, cy, 7, color);
     tft.drawCircle(cx, cy, 11, color);
-    tft.drawCircle(cx, cy, 18, color);
-    tft.drawCircle(cx, cy, 19, color);
-    tft.fillRect(cx - 24, cy + 1, 48, 18, bgColor); // Odříznutí spodku vln
+    tft.drawCircle(cx, cy, 12, color);
+    tft.fillRect(cx - 15, cy + 1, 30, 15, bgColor); // Odříznutí spodku vln
 }
 
 void GraphicsManager::drawThickLine(int x0, int y0, int x1, int y1, int thickness, uint16_t color) {
