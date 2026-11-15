@@ -15,7 +15,7 @@ let currentAppMode = 0;         // Aktuální běžící mód na displeji ESP32
 const modeNames = [
     "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048", "Hra Tetris",
     "Měření vzdálenosti", "Sledování čáry (IR)", "Wi-Fi QR spojení", "Wi-Fi CSI Radar",
-    "Ovládání serv", "Dokumentace", "Barevný senzor", "Spánkový režim"
+    "Ovládání serv", "Dokumentace", "Barevný senzor", "Světelný mód", "Spánkový režim"
 ];
 
 // --- 1. SPUSŤ PO NAČTENÍ STRÁNKY ---

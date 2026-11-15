@@ -172,8 +172,10 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
 
     // 1. Příkaz pro změnu aktivního režimu na displeji ESP32
     if (strcmp(cmd, "setMode") == 0) {
-        int mode = doc["mode"] | 0;             // Načteme číslo požadovaného módu
-        pState->setMode((AppMode)mode);         // Uložíme do SystemState (vláknově bezpečně přes mutex)
+        int mode = doc["mode"] | -1;            // Načteme číslo požadovaného módu
+        if (mode >= MODE_MAIN_MENU && mode <= MODE_SLEEP) {
+            pState->setMode((AppMode)mode);     // Uložíme do SystemState (vláknově bezpečně přes mutex)
+        }
     }
     // 2. Příkaz pro rozsvícení / zhasnutí jedné ze tří stavových LED
     else if (strcmp(cmd, "setLed") == 0) {
@@ -202,14 +204,17 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
     }
     // 6. Příkaz pro nastavení barvy a jasu na RGB LED pásku WS2812B
     else if (strcmp(cmd, "setLedStrip") == 0) {
-        uint8_t r = doc["r"] | 0;               // Červená složka (0-255)
-        uint8_t g = doc["g"] | 0;               // Zelená složka (0-255)
-        uint8_t b = doc["b"] | 0;               // Modrá složka (0-255)
-        uint8_t bright = doc["bright"] | 60;   // Celkový jas (0-255)
-        
-        // Spojíme R, G, B bajty do jednoho 32-bitového barevného čísla (0x00RRGGBB)
-        uint32_t col = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
-        pState->setRemoteLedOverride(col, bright);   // Zapíšeme do prioritního stavu s referencí senzoru
+        // V MODE_SVETLO pásek nesmí svítit, aby neoslňoval fotodiody
+        if (pState->getMode() != MODE_SVETLO) {
+            uint8_t r = doc["r"] | 0;               // Červená složka (0-255)
+            uint8_t g = doc["g"] | 0;               // Zelená složka (0-255)
+            uint8_t b = doc["b"] | 0;               // Modrá složka (0-255)
+            uint8_t bright = doc["bright"] | 60;   // Celkový jas (0-255)
+            
+            // Spojíme R, G, B bajty do jednoho 32-bitového barevného čísla (0x00RRGGBB)
+            uint32_t col = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+            pState->setRemoteLedOverride(col, bright);   // Zapíšeme do prioritního stavu s referencí senzoru
+        }
     }
     // 7. Příkaz pro spuštění kalibrace Wi-Fi CSI radaru (frontováno přes SystemState pro Core 0)
     else if (strcmp(cmd, "calibrateCsi") == 0) {

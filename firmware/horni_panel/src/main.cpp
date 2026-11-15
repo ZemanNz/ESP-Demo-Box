@@ -369,7 +369,7 @@ void Task_Demo_Autopilot(void *pvParameters) {
             requiredDuration = 25000; // 25 s pro hry
         }
 
-        // 4. Automatické cyklické přepnutí na další mód (všech 13 módů včetně her)
+        // 4. Automatické cyklické přepnutí na další mód (všech 14 módů včetně her)
         if (timeInMode >= requiredDuration) {
             timeInMode = 0;
             AppMode nextMode = MODE_MAIN_MENU;
@@ -387,7 +387,8 @@ void Task_Demo_Autopilot(void *pvParameters) {
                 case MODE_WIFI_DETECTION: nextMode = MODE_SERVA; break;
                 case MODE_SERVA:          nextMode = MODE_DOCS; break;
                 case MODE_DOCS:           nextMode = MODE_BAREVNY; break;
-                case MODE_BAREVNY:        nextMode = MODE_MAIN_MENU; break;
+                case MODE_BAREVNY:        nextMode = MODE_SVETLO; break;
+                case MODE_SVETLO:         nextMode = MODE_MAIN_MENU; break;
                 default:                  nextMode = MODE_MAIN_MENU; break;
             }
 
@@ -543,7 +544,7 @@ void Task_Sensors(void *pvParameters) {
     // Prvotní kalibrace gyroskopu po zapnutí
     sensorManager.calibrateIMU();
 
-    // Seznam všech 13 přepínatelných módů (mimo MODE_SLEEP)
+    // Seznam všech 14 přepínatelných módů (mimo MODE_SLEEP)
     static const AppMode kSelectableModes[] = {
         MODE_MAIN_MENU,
         MODE_GYRO,
@@ -557,7 +558,8 @@ void Task_Sensors(void *pvParameters) {
         MODE_WIFI_DETECTION,
         MODE_SERVA,
         MODE_DOCS,
-        MODE_BAREVNY
+        MODE_BAREVNY,
+        MODE_SVETLO
     };
     static const int kNumSelectableModes = sizeof(kSelectableModes) / sizeof(kSelectableModes[0]);
 
@@ -575,6 +577,7 @@ void Task_Sensors(void *pvParameters) {
     SensorData start = globalState.getSensorData();
 
     sensorManager.setLeds(0, 1, 0);
+    AppMode prevSensorMode = globalState.getMode();
     
 
     for (;;) {
@@ -665,6 +668,19 @@ void Task_Sensors(void *pvParameters) {
             }
         }
         lastBtnPressed = isPressed;
+
+        // Přechod do / z MODE_SVETLO: zhasnutí pásku a TCS34725 LED proti rušení světla
+        if (currentMode != prevSensorMode) {
+            if (currentMode == MODE_SVETLO) {
+                uint32_t offLeds[8] = {0};
+                sensorManager.setLedStrip(offLeds, 0);
+                sensorManager.setColorSensorLed(false);
+                sensorManager.readPhotoresistors();
+            } else if (prevSensorMode == MODE_SVETLO && currentMode != MODE_SLEEP) {
+                sensorManager.setColorSensorLed(true);
+            }
+            prevSensorMode = currentMode;
+        }
 
         // Vzorkování a integrace IMU (LSM6DS3) každých 10 ms pro všechny aktivní módy
         if (currentMode != MODE_SLEEP) {
@@ -947,6 +963,19 @@ void Task_Sensors(void *pvParameters) {
                 lastWifiConnJoyBtn = wifiConnData.joyBtn;
                 break;
             }
+            // =======================================================
+            case MODE_SVETLO: {
+                // Klasické funkce běží, ale horní LED pásek i bílá LED TCS34725 zůstávají vypnuté
+                handleClassicSensors(now, true, false, true);
+                static unsigned long lastLightPhotoRead = 0;
+                if (now - lastLightPhotoRead >= 40) {
+                    lastLightPhotoRead = now;
+                    sensorManager.readPhotoresistors();
+                }
+                break;
+            }
+
+            // =======================================================
             case MODE_MAIN_MENU:
             case MODE_VZDALENOST:
             case MODE_SERVA:
@@ -1002,6 +1031,383 @@ void Task_Sensors(void *pvParameters) {
     }
 }
 
+// =========================================================
+// Helpery pro MODE_SVETLO (Varianta 1A: classic_arc, 320x240)
+// =========================================================
+namespace {
+
+constexpr float kLightPi = 3.14159265f;
+
+struct LightRgb8 {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
+
+constexpr uint16_t lightRgb565(uint8_t r, uint8_t g, uint8_t b) {
+    return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (uint16_t)(b >> 3);
+}
+
+inline float clampFloat(float v, float lo, float hi) {
+    return (v < lo) ? lo : ((v > hi) ? hi : v);
+}
+
+uint16_t lerpLightRgb565(LightRgb8 a, LightRgb8 b, float t) {
+    float u = clampFloat(t, 0.0f, 1.0f);
+    uint8_t r  = (uint8_t)lroundf((float)a.r + ((float)b.r - (float)a.r) * u);
+    uint8_t g  = (uint8_t)lroundf((float)a.g + ((float)b.g - (float)a.g) * u);
+    uint8_t bl = (uint8_t)lroundf((float)a.b + ((float)b.b - (float)a.b) * u);
+    return lightRgb565(r, g, bl);
+}
+
+constexpr uint16_t kColLightBg          = lightRgb565(0x06, 0x0e, 0x17);
+constexpr uint16_t kColLightCardBg      = lightRgb565(0x0a, 0x18, 0x28);
+constexpr uint16_t kColLightCardBorder  = lightRgb565(0x1a, 0x38, 0x52);
+constexpr uint16_t kColLightTrackBg     = lightRgb565(0x0c, 0x1c, 0x2e);
+constexpr uint16_t kColLightTrackGroove = lightRgb565(0x13, 0x2a, 0x42);
+constexpr uint16_t kColLightTrackTick   = lightRgb565(0x2e, 0x55, 0x78);
+constexpr uint16_t kColLightCyan        = lightRgb565(0x00, 0xe5, 0xff);
+constexpr uint16_t kColLightYellow      = lightRgb565(0xfc, 0xe8, 0x03);
+constexpr uint16_t kColLightGreen       = lightRgb565(0x00, 0xff, 0x66);
+constexpr uint16_t kColLightMuted       = lightRgb565(0x8b, 0x94, 0x9e);
+constexpr uint16_t kColLightWhite       = lightRgb565(0xff, 0xff, 0xff);
+constexpr uint16_t kColLightBgDark      = lightRgb565(0x04, 0x0a, 0x12);
+constexpr uint16_t kColLightBarBorder   = lightRgb565(0x1d, 0x39, 0x52);
+constexpr uint16_t kColLightTickDark    = lightRgb565(0x18, 0x32, 0x4a);
+
+uint16_t lightPhotoGlowColor(float pct) {
+    float t = clampFloat(pct / 100.0f, 0.0f, 1.0f);
+    if (t < 0.35f) {
+        return lerpLightRgb565({0x13, 0x22, 0x33}, {0x1f, 0x6f, 0x8b}, t / 0.35f);
+    }
+    if (t < 0.75f) {
+        return lerpLightRgb565({0x1f, 0x6f, 0x8b}, {0xf5, 0x9e, 0x0b}, (t - 0.35f) / 0.40f);
+    }
+    return lerpLightRgb565({0xf5, 0x9e, 0x0b}, {0xff, 0xf3, 0xa1}, (t - 0.75f) / 0.25f);
+}
+
+uint16_t lightSunCoreColor(float brightnessPct) {
+    float t = clampFloat(brightnessPct / 100.0f, 0.0f, 1.0f);
+    if (t < 0.5f) {
+        return lerpLightRgb565({0x8a, 0x46, 0x00}, {0xff, 0xbe, 0x0b}, t / 0.5f);
+    }
+    return lerpLightRgb565({0xff, 0xbe, 0x0b}, {0xff, 0xf8, 0xc9}, (t - 0.5f) / 0.5f);
+}
+
+void canvasDrawText(GFXcanvas16* c, int x, int y, const char* text, uint16_t color, uint8_t size, int align = -1) {
+    if (!c || !text) return;
+    c->setTextSize(size);
+    c->setTextWrap(false);
+    c->setTextColor(color);
+    int drawX = x;
+    if (align >= 0) {
+        int16_t x1 = 0, y1 = 0;
+        uint16_t w = 0, h = 0;
+        c->getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+        drawX = (align == 0) ? (x - (int)(w / 2)) : (x - (int)w);
+    }
+    c->setCursor(drawX, y);
+    c->print(text);
+}
+
+void canvasDrawThickLine(GFXcanvas16* c, int x0, int y0, int x1, int y1, int thickness, uint16_t color) {
+    if (thickness <= 1) {
+        c->drawLine(x0, y0, x1, y1, color);
+        return;
+    }
+    float dx = (float)(x1 - x0);
+    float dy = (float)(y1 - y0);
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 0.001f) return;
+    float nx = (-dy / len) * (thickness * 0.5f);
+    float ny = (dx / len) * (thickness * 0.5f);
+
+    int p1x = (int)lroundf((float)x0 + nx), p1y = (int)lroundf((float)y0 + ny);
+    int p2x = (int)lroundf((float)x0 - nx), p2y = (int)lroundf((float)y0 - ny);
+    int p3x = (int)lroundf((float)x1 - nx), p3y = (int)lroundf((float)y1 - ny);
+    int p4x = (int)lroundf((float)x1 + nx), p4y = (int)lroundf((float)y1 + ny);
+
+    c->fillTriangle(p1x, p1y, p2x, p2y, p3x, p3y, color);
+    c->fillTriangle(p1x, p1y, p3x, p3y, p4x, p4y, color);
+}
+
+void canvasDrawArcPoly(GFXcanvas16* c, int cx, int cy, int r, float startRad, float endRad, int steps, uint16_t color, int thickness) {
+    int n = max(4, steps);
+    int prevX = cx + (int)lroundf((float)r * cosf(startRad));
+    int prevY = cy + (int)lroundf((float)r * sinf(startRad));
+    for (int i = 1; i <= n; i++) {
+        float a = startRad + ((endRad - startRad) * (float)i) / (float)n;
+        int nx = cx + (int)lroundf((float)r * cosf(a));
+        int ny = cy + (int)lroundf((float)r * sinf(a));
+        canvasDrawThickLine(c, prevX, prevY, nx, ny, thickness, color);
+        prevX = nx;
+        prevY = ny;
+    }
+}
+
+void canvasDrawVerticalMeter(GFXcanvas16* c, int x, int y, int w, int h, float pct, uint16_t fillCol) {
+    c->fillRoundRect(x, y, w, h, 2, kColLightBgDark);
+    c->drawRoundRect(x, y, w, h, 2, kColLightCardBorder);
+    int innerH = h - 4;
+    int fillH = (int)lroundf((clampFloat(pct, 0.0f, 100.0f) / 100.0f) * (float)innerH);
+    if (fillH > 0) {
+        c->fillRect(x + 2, y + h - 2 - fillH, w - 4, fillH, fillCol);
+    }
+    for (int q = 1; q <= 3; q++) {
+        int ty = y + (int)lroundf((float)(h * q) / 4.0f);
+        c->drawLine(x + 2, ty, x + w - 3, ty, kColLightTickDark);
+    }
+}
+
+void canvasDrawHorizontalBar(GFXcanvas16* c, int x, int y, int w, int h, float pct, uint16_t fillCol) {
+    c->fillRect(x, y, w, h, kColLightBgDark);
+    c->drawRect(x, y, w, h, kColLightBarBorder);
+    int fillW = (int)lroundf((clampFloat(pct, 0.0f, 100.0f) / 100.0f) * (float)(w - 2));
+    if (fillW > 0) {
+        c->fillRect(x + 1, y + 1, fillW, h - 2, fillCol);
+    }
+}
+
+void canvasDrawSun(GFXcanvas16* c, float sx, float sy, float brightnessPct, unsigned long timeMs) {
+    int cx = (int)lroundf(sx);
+    int cy = (int)lroundf(sy);
+    float b = clampFloat(brightnessPct / 100.0f, 0.0f, 1.0f);
+
+    if (b <= 0.04f) {
+        c->fillCircle(cx, cy, 6, lightRgb565(0x13, 0x22, 0x38));
+        c->drawCircle(cx, cy, 6, lightRgb565(0x50, 0x72, 0x96));
+        c->fillCircle(cx - 1, cy - 1, 2, lightRgb565(0x6b, 0x8e, 0xb5));
+        return;
+    }
+
+    int coreR = (int)lroundf(6.0f + b * 5.0f);
+    uint16_t outerHaloCol = lerpLightRgb565({0x06, 0x0e, 0x17}, {0xff, 0x91, 0x00}, 0.25f + 0.35f * b);
+    uint16_t innerHaloCol = lerpLightRgb565({0x2b, 0x1a, 0x00}, {0xff, 0xd0, 0x00}, 0.45f + 0.55f * b);
+    uint16_t rayCol       = lerpLightRgb565({0x99, 0x62, 0x00}, {0xff, 0xe6, 0x6d}, b);
+
+    c->fillCircle(cx, cy, coreR + 5, outerHaloCol);
+    c->fillCircle(cx, cy, coreR + 2, innerHaloCol);
+
+    float rot = fmodf((float)timeMs * 0.0008f, 2.0f * kLightPi);
+    float rStart = (float)(coreR + 2);
+    float rEnd = (float)(coreR + 3 + (int)lroundf(b * 3.0f));
+    for (int i = 0; i < 8; i++) {
+        float ang = rot + ((float)i * kLightPi) / 4.0f;
+        int x0 = cx + (int)lroundf(rStart * cosf(ang));
+        int y0 = cy + (int)lroundf(rStart * sinf(ang));
+        int x1 = cx + (int)lroundf(rEnd * cosf(ang));
+        int y1 = cy + (int)lroundf(rEnd * sinf(ang));
+        c->drawLine(x0, y0, x1, y1, rayCol);
+    }
+
+    c->fillCircle(cx, cy, coreR, lightSunCoreColor(brightnessPct));
+    c->drawCircle(cx, cy, coreR, lightRgb565(0xff, 0xf3, 0xb0));
+    int innerDotR = max(2, (int)lroundf((float)coreR * 0.45f));
+    c->fillCircle(cx, cy, innerDotR, lightRgb565(0xff, 0xfc, 0xe6));
+}
+
+void canvasDrawPhotoDot(GFXcanvas16* c, int cx, int cy, char letter, float pct, bool isDominant) {
+    float t = clampFloat(pct / 100.0f, 0.0f, 1.0f);
+    if (t > 0.08f) {
+        c->fillCircle(cx, cy, 19, lerpLightRgb565({0x06, 0x0e, 0x17}, {0xff, 0xbe, 0x0b}, t * 0.42f));
+        c->fillCircle(cx, cy, 16, lerpLightRgb565({0x06, 0x0e, 0x17}, {0x00, 0xe5, 0xff}, t * 0.55f));
+    } else {
+        c->drawCircle(cx, cy, 17, lightRgb565(0x16, 0x29, 0x3d));
+    }
+
+    c->fillCircle(cx, cy, 14, lightPhotoGlowColor(pct));
+    uint16_t ringCol = (isDominant && t > 0.08f)
+        ? kColLightCyan
+        : (t > 0.72f ? kColLightYellow : lightRgb565(0x3d, 0x5c, 0x78));
+    c->drawCircle(cx, cy, 14, ringCol);
+    c->drawCircle(cx, cy, 13, ringCol);
+
+    uint16_t txtCol = (t > 0.56f) ? kColLightBg : kColLightWhite;
+    const char label[2] = {letter, '\0'};
+    canvasDrawText(c, cx, cy - 7, label, txtCol, 2, 0);
+}
+
+void canvasDrawLightRay(GFXcanvas16* c, float sunX, float sunY, int targetX, int targetY, float pctVal, float brightnessPct) {
+    float dx = (float)targetX - sunX;
+    float dy = (float)targetY - sunY;
+    float dist = sqrtf(dx * dx + dy * dy);
+    if (dist < 36.0f) return;
+
+    float ux = dx / dist;
+    float uy = dy / dist;
+    float startD = 14.0f + (brightnessPct / 100.0f) * 4.0f;
+    float endD = dist - 20.0f;
+    if (endD <= startD) return;
+
+    int x0 = (int)lroundf(sunX + ux * startD);
+    int y0 = (int)lroundf(sunY + uy * startD);
+    int x1 = (int)lroundf(sunX + ux * endD);
+    int y1 = (int)lroundf(sunY + uy * endD);
+    float strength = clampFloat(pctVal / 100.0f, 0.0f, 1.0f);
+    uint16_t rayCol = lerpLightRgb565({0x13, 0x28, 0x3d}, {0xff, 0xe0, 0x66}, strength);
+    int width = (strength > 0.7f) ? 2 : 1;
+    canvasDrawThickLine(c, x0, y0, x1, y1, (strength > 0.35f) ? width : 1, rayCol);
+}
+
+void canvasDrawLightCardBase(GFXcanvas16* c, int x, int w, const char* title,
+                             uint16_t titleCol, uint16_t borderCol,
+                             const char* valueText, uint16_t valCol) {
+    const int y = 198;
+    const int h = 39;
+    const int centerX = x + w / 2;
+    c->fillRoundRect(x, y, w, h, 4, kColLightCardBg);
+    c->drawRoundRect(x, y, w, h, 4, borderCol);
+    canvasDrawText(c, centerX, 202, title, titleCol, 1, 0);
+    canvasDrawText(c, centerX, 214, valueText, valCol, 1, 0);
+}
+
+void renderLightModeClassicArc(GFXcanvas16* c, uint16_t rawPhotoL, uint16_t rawPhotoR,
+                               float smoothL, float smoothR, unsigned long nowMs) {
+    // Zesílení úhlové citlivosti pro ploché fotorezistory v pokojovém osvětlení (-10 deg @ 45 deg -> ~-45 deg)
+    constexpr float kLightAngleGain = 4.5f;
+
+    float sL = clampFloat(smoothL, 0.0f, 4095.0f);
+    float sR = clampFloat(smoothR, 0.0f, 4095.0f);
+    float pctL = clampFloat((sL / 4095.0f) * 100.0f, 0.0f, 100.0f);
+    float pctR = clampFloat((sR / 4095.0f) * 100.0f, 0.0f, 100.0f);
+    float brightnessPct = max(pctL, pctR);
+    float rawRatio = (sR - sL) / (sL + sR + 120.0f);
+    float normAngle = clampFloat(rawRatio * kLightAngleGain, -1.0f, 1.0f);
+    int angleDeg = constrain((int)lroundf(normAngle * 90.0f), -90, 90);
+
+    const char* dirText = "VYVAZENO";
+    uint16_t dirCol = kColLightGreen;
+    if (brightnessPct < 3.0f && abs(angleDeg) <= 5) {
+        dirText = "TMA (0%)";
+        dirCol = kColLightMuted;
+    } else if (angleDeg < -5) {
+        dirText = "<<< VLEVO";
+        dirCol = kColLightCyan;
+    } else if (angleDeg > 5) {
+        dirText = "VPRAVO >>>";
+        dirCol = kColLightYellow;
+    }
+
+    c->fillScreen(kColLightBg);
+
+    struct SideCfg {
+        char letter;
+        const char* label;
+        int meterX;
+        int meterPctX;
+        int dotX;
+        int cardX;
+        float pct;
+        uint16_t rawAdc;
+        bool dominant;
+    };
+    const int dotY = 38;
+    const SideCfg sides[2] = {
+        {'L', "FOTO L", 8,   15,  62,  4,   pctL, rawPhotoL, pctL > pctR + 3.0f},
+        {'P', "FOTO P", 299, 305, 258, 240, pctR, rawPhotoR, pctR > pctL + 3.0f}
+    };
+
+    char buf[20];
+    for (int i = 0; i < 2; i++) {
+        canvasDrawVerticalMeter(c, sides[i].meterX, 10, 13, 52, sides[i].pct, lightPhotoGlowColor(sides[i].pct));
+        snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(sides[i].pct));
+        canvasDrawText(c, sides[i].meterPctX, 66, buf, kColLightMuted, 1, 0);
+        canvasDrawText(c, sides[i].dotX, 4, sides[i].label, kColLightCyan, 1, 0);
+    }
+
+    // Středová vyrovnávací čára a výrazný indikátor směru
+    canvasDrawText(c, 160, 5, dirText, dirCol, 2, 0);
+    c->fillRect(92, 36, 136, 4, kColLightTrackBg);
+    c->drawRect(92, 36, 136, 4, lightRgb565(0x1f, 0x3f, 0x5c));
+    c->drawLine(160, 30, 160, 46, kColLightTrackTick);
+    int beadX = 160 + (int)lroundf(normAngle * 62.0f);
+    c->fillCircle(beadX, 38, 5, dirCol);
+    c->drawCircle(beadX, 38, 5, kColLightWhite);
+
+    // Zvětšený otevřený spodní půlkruh využívající prostor po zrušené horní liště
+    const int arcCx = 160;
+    const int arcCy = 80;
+    const int arcR = 92;
+    float theta = (kLightPi * 0.5f) * (1.0f - normAngle);
+    float sunX = (float)arcCx + (float)arcR * cosf(theta);
+    float sunY = (float)arcCy + (float)arcR * sinf(theta);
+
+    canvasDrawArcPoly(c, arcCx, arcCy, 56, kLightPi, 0.0f, 32, lightRgb565(0x0c, 0x1d, 0x30), 1);
+    for (int deg = -90; deg <= 90; deg += 30) {
+        float tAng = (kLightPi * 0.5f) * (1.0f - (float)deg / 90.0f);
+        int innerR = (deg % 90 == 0 || deg == 0) ? (arcR + 4) : (arcR + 5);
+        int outerR = (deg % 90 == 0 || deg == 0) ? (arcR + 10) : (arcR + 8);
+        c->drawLine(
+            arcCx + (int)lroundf((float)innerR * cosf(tAng)),
+            arcCy + (int)lroundf((float)innerR * sinf(tAng)),
+            arcCx + (int)lroundf((float)outerR * cosf(tAng)),
+            arcCy + (int)lroundf((float)outerR * sinf(tAng)),
+            (deg == 0) ? kColLightGreen : kColLightTrackTick
+        );
+    }
+    canvasDrawText(c, 49, arcCy - 3, "-90", kColLightMuted, 1, 1);
+    canvasDrawText(c, 271, arcCy - 3, "+90", kColLightMuted, 1, -1);
+
+    canvasDrawArcPoly(c, arcCx, arcCy, arcR, kLightPi, 0.0f, 48, kColLightTrackGroove, 4);
+    canvasDrawArcPoly(c, arcCx, arcCy, arcR, kLightPi, 0.0f, 48, kColLightTrackTick, 1);
+    if (fabsf(normAngle) > 0.02f) {
+        uint16_t sweepCol = (normAngle < 0.0f) ? kColLightCyan : kColLightYellow;
+        canvasDrawArcPoly(c, arcCx, arcCy, arcR, kLightPi * 0.5f, theta, 28, sweepCol, 3);
+    }
+
+    for (int i = 0; i < 2; i++) {
+        canvasDrawLightRay(c, sunX, sunY, sides[i].dotX, dotY, sides[i].pct, brightnessPct);
+    }
+
+    float vecDx = sunX - (float)arcCx;
+    float vecDy = sunY - (float)arcCy;
+    float vecLen = sqrtf(vecDx * vecDx + vecDy * vecDy);
+    if (vecLen > 22.0f) {
+        float rEnd = vecLen - 16.0f;
+        c->drawLine(
+            arcCx, arcCy,
+            arcCx + (int)lroundf((vecDx / vecLen) * rEnd),
+            arcCy + (int)lroundf((vecDy / vecLen) * rEnd),
+            lightRgb565(0x2a, 0x53, 0x78)
+        );
+    }
+
+    // Středový bod r=4 (otevřený oblouk bez rámečku)
+    c->fillCircle(arcCx, arcCy, 4, kColLightCyan);
+    c->drawCircle(arcCx, arcCy, 4, kColLightWhite);
+
+    canvasDrawSun(c, sunX, sunY, brightnessPct, nowMs);
+    for (int i = 0; i < 2; i++) {
+        canvasDrawPhotoDot(c, sides[i].dotX, dotY, sides[i].letter, sides[i].pct, sides[i].dominant);
+    }
+
+    // Spodní 4 karty (y=198..237), FOTO L / FOTO P bez duplicitních %
+    for (int i = 0; i < 2; i++) {
+        snprintf(buf, sizeof(buf), "ADC: %u", (unsigned)sides[i].rawAdc);
+        uint16_t border = sides[i].dominant ? kColLightCyan : kColLightCardBorder;
+        canvasDrawLightCardBase(c, sides[i].cardX, 76, sides[i].label, kColLightCyan, border, buf, kColLightWhite);
+        canvasDrawHorizontalBar(c, sides[i].cardX + 4, 227, 68, 6, sides[i].pct, lightPhotoGlowColor(sides[i].pct));
+    }
+
+    snprintf(buf, sizeof(buf), "%s%d deg", (angleDeg > 0) ? "+" : "", angleDeg);
+    canvasDrawLightCardBase(c, 84, 74, "ODCHYLKA", kColLightMuted, kColLightCardBorder, buf, dirCol);
+    c->fillRect(88, 227, 66, 6, kColLightBgDark);
+    c->drawRect(88, 227, 66, 6, kColLightBarBorder);
+    int offsetPx = (int)lroundf(normAngle * 31.0f);
+    if (offsetPx < 0) {
+        c->fillRect(121 + offsetPx, 228, -offsetPx, 4, kColLightCyan);
+    } else if (offsetPx > 0) {
+        c->fillRect(121, 228, offsetPx, 4, kColLightYellow);
+    }
+    c->drawLine(121, 225, 121, 234, kColLightWhite);
+
+    snprintf(buf, sizeof(buf), "%d%%", (int)lroundf(brightnessPct));
+    canvasDrawLightCardBase(c, 162, 74, "JAS OKOLI", kColLightMuted, kColLightCardBorder, buf, kColLightYellow);
+    canvasDrawHorizontalBar(c, 166, 227, 66, 6, brightnessPct, kColLightYellow);
+}
+
+} // namespace
+
 // ---------------------------------------------------------
 // 4. Task: Displej a State Machine (Poběží na Core 1)
 // ---------------------------------------------------------
@@ -1044,6 +1450,7 @@ void Task_Display_UI(void *pvParameters) {
                     case MODE_SERVA:          title = "INFO: SERVA"; break;
                     case MODE_DOCS:           title = "INFO: DOKUMENTACE"; break;
                     case MODE_BAREVNY:        title = "INFO: BAREVNY SENZOR"; break;
+                    case MODE_SVETLO:         title = "INFO: SVETELNY MOD"; break;
                     default: break;
                 }
                 gfx.drawTextPartial(25, 22, title, ST77XX_YELLOW, ST77XX_BLACK, 2);
@@ -1066,6 +1473,15 @@ void Task_Display_UI(void *pvParameters) {
                         gfx.drawTextPartial(20, 135, "- LED podsviceni: Adaptivni PWM", ST77XX_WHITE, ST77XX_BLACK, 1);
                         gfx.drawTextPartial(20, 155, "- Rizeno podle fotorezistoru", ST77XX_WHITE, ST77XX_BLACK, 1);
                         gfx.drawTextPartial(20, 175, "- Horni pasek: Barva dle senzoru", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        break;
+                    case MODE_SVETLO:
+                        gfx.drawTextPartial(20, 55, "- 2x fotorezistor: FOTO L a FOTO P (ADC)", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 75, "- Oblouk se slunickem ukazuje smer svetla", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 95, "- Vyrovnani podle jasu: VLEVO / VPRAVO", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 115, "- Klasicke funkce a senzory dal bezi", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 135, "- Horni LED pasek WS2812B je vypnuty", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 155, "- Bila LED barevneho senzoru je vypnuta", ST77XX_WHITE, ST77XX_BLACK, 1);
+                        gfx.drawTextPartial(20, 175, "- Duvod: neruseni mereni okolniho svetla", ST77XX_WHITE, ST77XX_BLACK, 1);
                         break;
                     case MODE_GYRO:
                         gfx.drawTextPartial(20, 55, "- 6-osy senzor LSM6DS3 (I2C)", ST77XX_WHITE, ST77XX_BLACK, 1);
@@ -1984,6 +2400,49 @@ void Task_Display_UI(void *pvParameters) {
                         }
                     }
                 }
+                break;
+            }
+
+            // =======================================================
+            // MÓD: SVĚTELNÝ MÓD (Varianta 1A: Klasický oblouk — Čistý)
+            // =======================================================
+            case MODE_SVETLO: {
+                delay = 40; // ~25 fps plynulé vykreslování přes PSRAM double-buffer
+                SensorData data = globalState.getSensorData();
+                static float smoothL = 0.0f;
+                static float smoothR = 0.0f;
+                static bool lightEmaInit = false;
+
+                float rawL = (float)constrain((int)data.photo1, 0, 4095);
+                float rawR = (float)constrain((int)data.photo2, 0, 4095);
+                if (modeJustChanged || needsFullRedraw || !lightEmaInit) {
+                    smoothL = rawL;
+                    smoothR = rawR;
+                    lightEmaInit = true;
+                } else {
+                    const float kEmaAlpha = 0.25f;
+                    smoothL += kEmaAlpha * (rawL - smoothL);
+                    smoothR += kEmaAlpha * (rawR - smoothR);
+                }
+
+                GFXcanvas16* canvas = gfx.getCanvas();
+                if (!canvas) {
+                    if (needsFullRedraw) {
+                        gfx.clearScreen(ST77XX_BLACK);
+                        gfx.drawTextPartial(20, 100, "SVETELNY MOD (CHYBI PSRAM)", ST77XX_YELLOW, ST77XX_BLACK, 1);
+                    }
+                    break;
+                }
+
+                renderLightModeClassicArc(
+                    canvas,
+                    (uint16_t)constrain((int)data.photo1, 0, 4095),
+                    (uint16_t)constrain((int)data.photo2, 0, 4095),
+                    smoothL,
+                    smoothR,
+                    millis()
+                );
+                gfx.pushCanvasToScreen();
                 break;
             }
 

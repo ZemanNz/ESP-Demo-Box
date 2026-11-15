@@ -23,6 +23,7 @@ enum AppMode {
     MODE_SERVA,
     MODE_DOCS,
     MODE_BAREVNY,
+    MODE_SVETLO,
     MODE_SLEEP
 };
 #define MODE_SENSORS MODE_GYRO

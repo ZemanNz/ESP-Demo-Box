@@ -38,7 +38,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         
         <div class="header-actions">
             <!-- Rychlé tlačítko pro uspání boxu -->
-            <button class="quick-sleep-btn" onclick="setAppMode(13)" title="Uspat ESP-Demo-Box">
+            <button class="quick-sleep-btn" onclick="setAppMode(14)" title="Uspat ESP-Demo-Box">
                 💤 Uspat
             </button>
             <!-- Indikátor stavu WebSocket spojení (Online / Připojování / Odpojeno) -->
@@ -418,7 +418,8 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
                     <button class="mode-btn" onclick="setAppMode(9)">📡 CSI Radar</button>
                     <button class="mode-btn" onclick="setAppMode(10)">🦾 Serva & Rameno</button>
                     <button class="mode-btn" onclick="setAppMode(12)">🎨 Barevný senzor</button>
-                    <button class="mode-btn mode-sleep-btn" onclick="setAppMode(13)">💤 Uspat box (Spánek)</button>
+                    <button class="mode-btn" onclick="setAppMode(13)">☀️ Světelný mód</button>
+                    <button class="mode-btn mode-sleep-btn" onclick="setAppMode(14)">💤 Uspat box (Spánek)</button>
                 </div>
             </div>
 
@@ -1462,7 +1463,7 @@ let currentAppMode = 0;         // Aktuální běžící mód na displeji ESP32
 const modeNames = [
     "Hlavní menu", "Gyroskop", "Hra Snake", "Hra Flappy", "Hra 2048", "Hra Tetris",
     "Měření vzdálenosti", "Sledování čáry (IR)", "Wi-Fi QR spojení", "Wi-Fi CSI Radar",
-    "Ovládání serv", "Dokumentace", "Barevný senzor", "Spánkový režim"
+    "Ovládání serv", "Dokumentace", "Barevný senzor", "Světelný mód", "Spánkový režim"
 ];
 
 // --- 1. SPUSŤ PO NAČTENÍ STRÁNKY ---

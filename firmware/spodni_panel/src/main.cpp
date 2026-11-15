@@ -643,6 +643,7 @@ void Task_Sensors(void *pvParameters) {
             }
 
             case MODE_MAIN_MENU:
+            case MODE_SVETLO:
             case MODE_GYRO:
             case MODE_BAREVNY:
             case MODE_VZDALENOST:

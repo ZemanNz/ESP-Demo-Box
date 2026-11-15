@@ -22,6 +22,7 @@ enum AppMode {
     MODE_SERVA,
     MODE_DOCS,
     MODE_BAREVNY,
+    MODE_SVETLO,
     MODE_SLEEP
 };
 
