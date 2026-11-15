@@ -4,6 +4,7 @@
 #include <SPI.h>
 
 #include "GraphicsManager.h"
+#include "SensorManager.h"
 // Objekt gfx je deklarován v GraphicsManager.h a vytvořen v GraphicsManager.cpp
 
 // Globální instance UART1 pro komunikaci se spodním panelem
@@ -147,8 +148,7 @@ static void setupGpioPeripherals() {
 #endif
 
 #ifdef ENABLE_BUZZER
-    pinMode(PIN_BUZZER, OUTPUT);
-    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL); // Klidový stav = TICHO
+    sensorManager.initBuzzer(); // LEDC PWM na PIN_BUZZER + výchozí klidový stav TICHO
 #endif
 
 #ifdef ENABLE_LEDS
@@ -194,6 +194,12 @@ bool initializeAllHardware() {
     Serial.println("\n=====================================");
     Serial.println("   STARTUJE HARDWARE HORNIHO PANELU  ");
     Serial.println("=====================================");
+
+#ifdef ENABLE_BUZZER
+    // Okamžitě uzamkneme pin bzučáku do klidové úrovně TICHO ještě před inicializací sběrnic
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+#endif
 
     // 1. DISPLEJ MUSÍ BÝT PRVNÍ!
     if (!setupDisplay()) {
@@ -360,10 +366,11 @@ bool initializeAllHardware() {
         Serial.println("[POST] CHYBA HARDWARU! Cekam na stisk horniho tlacitka pro preskoceni...");
 
         // Výstražné pípnutí bzučáku
-        #ifdef PIN_BUZZER
-        digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
+        #ifdef ENABLE_BUZZER
+        sensorManager.initBuzzer();
+        sensorManager.setBuzzerEx(true, 1500, 90, BUZZER_MODE_TONE);
         delay(180);
-        digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+        sensorManager.stopBuzzer();
         #endif
 
         // Čekáme na stisk horního tlačítka (PIN_BTN1 = GPIO 47, sepnuto = LOW)

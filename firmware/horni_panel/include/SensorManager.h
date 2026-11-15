@@ -2,8 +2,29 @@
 #define SENSOR_MANAGER_H
 
 #include <Arduino.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+#include <freertos/semphr.h>
 #include "SystemState.h"
 #include "config.h"
+
+/**
+ * @brief Režim buzení bzučáku přes LEDC PWM.
+ */
+enum BuzzerDriveMode : uint8_t {
+    BUZZER_MODE_TONE = 0, // Tónový režim: mění frekvenci tónu (pasivní bzučák) i střídu 0..50 %
+    BUZZER_MODE_PWM  = 1  // Výkonový PWM režim: pevná vysoká nosná (18 kHz), mění střídu 0..100 %
+};
+
+/**
+ * @brief Jedna nota v neblokující herní nebo testovací melodii.
+ */
+struct BuzzerNote {
+    uint16_t freq;       // Frekvence v Hz (0 = pauza/ticho po dobu durationMs)
+    uint16_t durationMs; // Délka znění tónu v ms
+    uint16_t pauseMs;    // Krátká mezera ticha za tónem v ms
+};
 
 // ---------------------------------------------------------
 // Třída SensorManager pro kompletní čtení i ovládání hardware horního panelu
@@ -53,9 +74,28 @@ public:
     // Vestavěná RGB LED na desce ESP32-S3 (GPIO 38)
     void setBuiltinRgb(uint8_t r, uint8_t g, uint8_t b);
 
-    // Pasivní bzučák (Spustí/zastaví tón a uloží stav do SensorData)
-    void setBuzzer(bool active, uint16_t freq = 1000);
+    // Bzučák (LEDC PWM řízení hlasitosti, tónů a neblokujících herních melodií)
+    void initBuzzer();
+    void setBuzzer(bool active, uint16_t freq = 2000);
+    void setBuzzerEx(bool active, uint16_t freq, uint8_t volume, BuzzerDriveMode mode = BUZZER_MODE_TONE);
     void beep(uint16_t freq = 1000, uint32_t durationMs = 100);
+    void beep(uint16_t freq, uint32_t durationMs, uint8_t volume, BuzzerDriveMode mode = BUZZER_MODE_TONE);
+    void playMelody(const BuzzerNote* notes, uint8_t count, uint8_t volume = 255, BuzzerDriveMode mode = BUZZER_MODE_TONE);
+    void playScoreSound();
+    void playSnakeEatSound();
+    void playTetrisLineSound(uint8_t lines = 1);
+    void playGameStartSound();
+    void playGameOverSound();
+    void playHighScoreResetSound();
+    void playMotionAlertSound();
+    void stopBuzzer();
+    bool isBuzzerPlaying() const;
+    void setBuzzerVolume(uint8_t volume);
+    uint8_t getBuzzerVolume() const { return buzzerVolume; }
+    void setBuzzerDriveMode(BuzzerDriveMode mode) { buzzerDriveMode = mode; }
+    BuzzerDriveMode getBuzzerDriveMode() const { return buzzerDriveMode; }
+    void prepareBuzzerForSleep();
+    void restoreBuzzerAfterSleep();
 
     // Sedmisegmentový displej přes 74HC595 (Zobrazí číslo a uloží do SensorData)
     void set7Segment(int value);
@@ -91,6 +131,30 @@ private:
     float lastGz = 0.0f;
     bool imuCalibrated = false;
     unsigned long lastImuTimeUs = 0;
+
+    // Stav LEDC PWM bzučáku a neblokující fronty melodií
+    static constexpr uint8_t BUZZER_MAX_MELODY_NOTES = 12;
+    portMUX_TYPE buzzerMux = portMUX_INITIALIZER_UNLOCKED;
+    SemaphoreHandle_t buzzerHwMutex = nullptr;
+    esp_timer_handle_t buzzerTimer = nullptr;
+    bool buzzerInitialized = false;
+    bool buzzerAttached = false;
+    bool buzzerSlept = false;
+    uint32_t currentBuzzerLedcFreq = 0;
+    uint8_t buzzerVolume = BUZZER_DEFAULT_VOLUME;
+    BuzzerDriveMode buzzerDriveMode = BUZZER_MODE_TONE;
+
+    BuzzerNote melodyQueue[BUZZER_MAX_MELODY_NOTES] = {};
+    uint8_t melodyLen = 0;
+    uint8_t melodyIdx = 0;
+    bool melodyInGap = false;
+    bool melodyPlaying = false;
+    uint8_t activeMelodyVol = BUZZER_DEFAULT_VOLUME;
+    BuzzerDriveMode activeMelodyMode = BUZZER_MODE_TONE;
+
+    void applyBuzzerHardware(bool active, uint16_t freq, uint8_t volume, BuzzerDriveMode mode);
+    void startNextMelodyStep();
+    static void buzzerTimerCallback(void* arg);
 };
 
 extern SensorManager sensorManager;

@@ -3,6 +3,8 @@
 
 extern volatile bool g_imuHwInterruptFired;
 #include <Wire.h>
+#include <driver/gpio.h>
+#include <driver/ledc.h>
 
 // Externí instance senzorů a periferií definované v HardwareSetup.cpp
 #if defined(ENABLE_DHT) || defined(ENABLE_DHT22)
@@ -431,25 +433,467 @@ void SensorManager::setBuiltinRgb(uint8_t r, uint8_t g, uint8_t b) {
 #endif
 }
 
-// Bzučák
-void SensorManager::setBuzzer(bool active, uint16_t freq) {
+// =============================================================================
+// Bzučák (LEDC PWM řízení hlasitosti, tónů a neblokujících herních melodií)
+// =============================================================================
+
 #ifdef ENABLE_BUZZER
-    if (active) {
-        digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
-    } else {
-        digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+static inline void forceBuzzerPinSilent() {
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+}
+
+struct BuzzerHwLock {
+    SemaphoreHandle_t mtx;
+    bool locked = false;
+    explicit BuzzerHwLock(SemaphoreHandle_t m) : mtx(m) {
+        if (mtx != nullptr) {
+            locked = (xSemaphoreTake(mtx, portMAX_DELAY) == pdTRUE);
+        }
     }
+    ~BuzzerHwLock() {
+        if (locked) {
+            xSemaphoreGive(mtx);
+        }
+    }
+};
 #endif
-    globalState.updateBuzzer(active, freq); // Uloží stav do SensorData
+
+void SensorManager::initBuzzer() {
+#ifdef ENABLE_BUZZER
+    if (buzzerInitialized) return;
+
+    // Nejprve nastavíme klidovou úroveň TICHO (HIGH) a LEDC necháme odpojené do prvního tónu
+    forceBuzzerPinSilent();
+
+    if (buzzerHwMutex == nullptr) {
+        buzzerHwMutex = xSemaphoreCreateMutex();
+    }
+
+    currentBuzzerLedcFreq = BUZZER_PWM_CARRIER_HZ;
+    ledcSetup(LEDC_CHAN_BUZZER, currentBuzzerLedcFreq, BUZZER_LEDC_RES);
+    buzzerAttached = false;
+
+    if (buzzerTimer == nullptr) {
+        esp_timer_create_args_t timerArgs = {};
+        timerArgs.callback = &SensorManager::buzzerTimerCallback;
+        timerArgs.arg = this;
+        timerArgs.dispatch_method = ESP_TIMER_TASK;
+        timerArgs.name = "buzzer_melody";
+        esp_timer_create(&timerArgs, &buzzerTimer);
+    }
+
+    buzzerSlept = false;
+    buzzerInitialized = true;
+#endif
+}
+
+void SensorManager::applyBuzzerHardware(bool active, uint16_t freq, uint8_t volume, BuzzerDriveMode mode) {
+#ifdef ENABLE_BUZZER
+    if (!buzzerInitialized) {
+        initBuzzer();
+    }
+    if (buzzerSlept) return;
+
+    constexpr uint32_t maxDuty = (1U << BUZZER_LEDC_RES) - 1U; // 1023
+    constexpr uint32_t fullScale = (1U << BUZZER_LEDC_RES);    // 1024
+
+    if (!active || volume == 0 || (mode == BUZZER_MODE_TONE && freq == 0)) {
+        if (buzzerAttached) {
+            // Před odpojením LEDC zapsat do GPIO registru klidovou úroveň, aby pin při přepnutí nekmitl
+            digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+            ledc_stop(LEDC_LOW_SPEED_MODE,
+                      static_cast<ledc_channel_t>(LEDC_CHAN_BUZZER % 8U),
+                      (BUZZER_SILENT_LEVEL == HIGH) ? 1U : 0U);
+            ledcDetachPin(PIN_BUZZER);
+            buzzerAttached = false;
+        }
+        forceBuzzerPinSilent();
+        return;
+    }
+
+    uint32_t targetFreq = (mode == BUZZER_MODE_PWM)
+        ? BUZZER_PWM_CARRIER_HZ
+        : constrain((uint32_t)freq, 40UL, 25000UL);
+
+    if (targetFreq != currentBuzzerLedcFreq) {
+        uint32_t applied = ledcChangeFrequency(LEDC_CHAN_BUZZER, targetFreq, BUZZER_LEDC_RES);
+        if (applied > 0) {
+            currentBuzzerLedcFreq = targetFreq;
+        }
+    }
+
+    uint8_t vol = (volume > 100) ? 100 : volume;
+    // Pro tónový režim má maximální hlasitost 50% střídu (čistý obdélník), pro PWM režim až 100% (trvalé sepnutí)
+    uint32_t maxActiveTicks = (mode == BUZZER_MODE_PWM) ? fullScale : (fullScale / 2U);
+
+    // Kvadratická křivka střídy lépe odpovídá logaritmické citlivosti sluchu
+    uint32_t activeTicks = ((uint32_t)vol * (uint32_t)vol * maxActiveTicks) / 10000UL;
+    if (activeTicks == 0) activeTicks = 1U;
+    if (activeTicks > fullScale) activeTicks = fullScale;
+
+    uint32_t duty;
+    if (BUZZER_SILENT_LEVEL == HIGH) {
+        duty = (activeTicks >= fullScale) ? 0U : (fullScale - activeTicks);
+        if (duty >= maxDuty) duty = maxDuty - 1U; // Zabrání ledcWrite() převést 1023 na 1024 (ticho)
+    } else {
+        duty = activeTicks;
+        if (duty == 0) duty = 1U;
+        if (duty > maxDuty) duty = maxDuty;
+    }
+
+    if (!buzzerAttached) {
+        // Atomické připojení kanálu s cílovým duty (ledcAttachPin by četl výchozí duty=0 -> trvalý tón)
+        ledc_channel_config_t chCfg = {};
+        chCfg.gpio_num = PIN_BUZZER;
+        chCfg.speed_mode = LEDC_LOW_SPEED_MODE;
+        chCfg.channel = static_cast<ledc_channel_t>(LEDC_CHAN_BUZZER % 8U);
+        chCfg.intr_type = LEDC_INTR_DISABLE;
+        chCfg.timer_sel = static_cast<ledc_timer_t>((LEDC_CHAN_BUZZER / 2U) % 4U);
+        chCfg.duty = duty;
+        chCfg.hpoint = 0;
+        ledc_channel_config(&chCfg);
+        buzzerAttached = true;
+    } else {
+        ledcWrite(LEDC_CHAN_BUZZER, duty);
+    }
+#else
+    (void)active; (void)freq; (void)volume; (void)mode;
+#endif
+}
+
+void SensorManager::setBuzzerVolume(uint8_t volume) {
+    uint8_t v = (volume > 100) ? 100 : volume;
+    portENTER_CRITICAL(&buzzerMux);
+    buzzerVolume = v;
+    portEXIT_CRITICAL(&buzzerMux);
+    globalState.updateBuzzer(globalState.getSensorData().buzzerActive,
+                             globalState.getSensorData().buzzerFreq, v);
+}
+
+void SensorManager::stopBuzzer() {
+#ifdef ENABLE_BUZZER
+    if (!buzzerInitialized) {
+        initBuzzer();
+    }
+    BuzzerHwLock lock(buzzerHwMutex);
+#endif
+    if (buzzerTimer != nullptr) {
+        esp_timer_stop(buzzerTimer);
+    }
+    portENTER_CRITICAL(&buzzerMux);
+    melodyPlaying = false;
+    melodyInGap = false;
+    melodyLen = 0;
+    melodyIdx = 0;
+    uint8_t curVol = buzzerVolume;
+    BuzzerDriveMode curMode = buzzerDriveMode;
+    portEXIT_CRITICAL(&buzzerMux);
+
+    applyBuzzerHardware(false, 0, curVol, curMode);
+    globalState.updateBuzzer(false, 0, curVol);
+}
+
+bool SensorManager::isBuzzerPlaying() const {
+    return melodyPlaying;
+}
+
+void SensorManager::setBuzzer(bool active, uint16_t freq) {
+    setBuzzerEx(active, freq, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::setBuzzerEx(bool active, uint16_t freq, uint8_t volume, BuzzerDriveMode mode) {
+#ifdef ENABLE_BUZZER
+    if (!buzzerInitialized) {
+        initBuzzer();
+    }
+    BuzzerHwLock lock(buzzerHwMutex);
+#endif
+    if (buzzerTimer != nullptr) {
+        esp_timer_stop(buzzerTimer);
+    }
+    uint8_t v = (volume > 100) ? 100 : volume;
+    portENTER_CRITICAL(&buzzerMux);
+    melodyPlaying = false;
+    melodyInGap = false;
+    melodyLen = 0;
+    portEXIT_CRITICAL(&buzzerMux);
+
+    applyBuzzerHardware(active, freq, v, mode);
+    globalState.updateBuzzer(active, active ? freq : 0, v);
 }
 
 void SensorManager::beep(uint16_t freq, uint32_t durationMs) {
+    beep(freq, durationMs, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::beep(uint16_t freq, uint32_t durationMs, uint8_t volume, BuzzerDriveMode mode) {
+    if (durationMs == 0) return;
+    uint16_t dur = (durationMs > 60000UL) ? 60000U : (uint16_t)durationMs;
+    BuzzerNote single = { freq, dur, 0 };
+    playMelody(&single, 1, volume, mode);
+}
+
+void SensorManager::playMelody(const BuzzerNote* notes, uint8_t count, uint8_t volume, BuzzerDriveMode mode) {
 #ifdef ENABLE_BUZZER
-    digitalWrite(PIN_BUZZER, BUZZER_ACTIVE_LEVEL);
-    delay(durationMs);
-    digitalWrite(PIN_BUZZER, BUZZER_SILENT_LEVEL);
+    if (notes == nullptr || count == 0) return;
+    if (!buzzerInitialized) {
+        initBuzzer();
+    }
+    BuzzerHwLock lock(buzzerHwMutex);
+    if (buzzerSlept) return;
+
+    if (buzzerTimer != nullptr) {
+        esp_timer_stop(buzzerTimer);
+    }
+
+    uint8_t n = (count > BUZZER_MAX_MELODY_NOTES) ? BUZZER_MAX_MELODY_NOTES : count;
+    uint8_t targetVol = (volume <= 100) ? volume : buzzerVolume;
+
+    portENTER_CRITICAL(&buzzerMux);
+    for (uint8_t i = 0; i < n; i++) {
+        melodyQueue[i] = notes[i];
+    }
+    melodyLen = n;
+    melodyIdx = 0;
+    melodyInGap = false;
+    melodyPlaying = true;
+    activeMelodyVol = targetVol;
+    activeMelodyMode = mode;
+    portEXIT_CRITICAL(&buzzerMux);
+
+    startNextMelodyStep();
+#else
+    (void)notes; (void)count; (void)volume; (void)mode;
 #endif
-    globalState.updateBuzzer(false, 0);
+}
+
+void SensorManager::startNextMelodyStep() {
+    bool shouldPlay = false;
+    uint16_t freq = 0;
+    uint16_t durMs = 0;
+    uint8_t vol = 0;
+    BuzzerDriveMode mode = BUZZER_MODE_TONE;
+
+    portENTER_CRITICAL(&buzzerMux);
+    if (melodyPlaying && melodyIdx < melodyLen) {
+        shouldPlay = true;
+        freq = melodyQueue[melodyIdx].freq;
+        durMs = melodyQueue[melodyIdx].durationMs;
+        if (durMs == 0) durMs = 1;
+        vol = activeMelodyVol;
+        mode = activeMelodyMode;
+    } else {
+        melodyPlaying = false;
+        vol = buzzerVolume;
+        mode = buzzerDriveMode;
+    }
+    portEXIT_CRITICAL(&buzzerMux);
+
+    if (!shouldPlay) {
+        applyBuzzerHardware(false, 0, vol, mode);
+        globalState.updateBuzzer(false, 0, vol);
+        return;
+    }
+
+    bool activeNote = (vol > 0) && (mode == BUZZER_MODE_PWM || freq > 0);
+    applyBuzzerHardware(activeNote, freq, vol, mode);
+    globalState.updateBuzzer(activeNote, activeNote ? freq : 0, vol);
+
+    if (buzzerTimer != nullptr) {
+        esp_timer_stop(buzzerTimer);
+        esp_timer_start_once(buzzerTimer, (uint64_t)durMs * 1000ULL);
+    }
+}
+
+void SensorManager::buzzerTimerCallback(void* arg) {
+    SensorManager* self = static_cast<SensorManager*>(arg);
+    if (self == nullptr) return;
+
+#ifdef ENABLE_BUZZER
+    BuzzerHwLock lock(self->buzzerHwMutex);
+#endif
+    // Pokud jiný task stihl před naším zámkem spustit novou melodii, tento starý callback ignorujeme
+    if (self->buzzerTimer != nullptr && esp_timer_is_active(self->buzzerTimer)) {
+        return;
+    }
+
+    enum NextAction { ACTION_NONE, ACTION_STOP, ACTION_GAP, ACTION_NEXT_NOTE };
+    NextAction action = ACTION_NONE;
+    uint16_t gapMs = 0;
+    uint8_t vol = 0;
+    BuzzerDriveMode mode = BUZZER_MODE_TONE;
+
+    portENTER_CRITICAL(&self->buzzerMux);
+    if (self->melodyPlaying && self->melodyIdx < self->melodyLen) {
+        vol = self->activeMelodyVol;
+        mode = self->activeMelodyMode;
+        if (!self->melodyInGap) {
+            uint16_t pMs = self->melodyQueue[self->melodyIdx].pauseMs;
+            if (pMs > 0 && (self->melodyIdx + 1) < self->melodyLen) {
+                self->melodyInGap = true;
+                gapMs = pMs;
+                action = ACTION_GAP;
+            } else {
+                self->melodyIdx++;
+                if (self->melodyIdx < self->melodyLen) {
+                    action = ACTION_NEXT_NOTE;
+                } else {
+                    self->melodyPlaying = false;
+                    action = ACTION_STOP;
+                }
+            }
+        } else {
+            self->melodyInGap = false;
+            self->melodyIdx++;
+            if (self->melodyIdx < self->melodyLen) {
+                action = ACTION_NEXT_NOTE;
+            } else {
+                self->melodyPlaying = false;
+                action = ACTION_STOP;
+            }
+        }
+    } else if (self->melodyPlaying) {
+        self->melodyPlaying = false;
+        vol = self->buzzerVolume;
+        mode = self->buzzerDriveMode;
+        action = ACTION_STOP;
+    }
+    portEXIT_CRITICAL(&self->buzzerMux);
+
+    if (action == ACTION_GAP) {
+        self->applyBuzzerHardware(false, 0, vol, mode);
+        globalState.updateBuzzer(false, 0, vol);
+        if (self->buzzerTimer != nullptr) {
+            esp_timer_stop(self->buzzerTimer);
+            esp_timer_start_once(self->buzzerTimer, (uint64_t)gapMs * 1000ULL);
+        }
+    } else if (action == ACTION_NEXT_NOTE) {
+        self->startNextMelodyStep();
+    } else if (action == ACTION_STOP) {
+        self->applyBuzzerHardware(false, 0, vol, mode);
+        globalState.updateBuzzer(false, 0, vol);
+    }
+}
+
+template <size_t N>
+static inline void playPresetNotes(SensorManager* mgr, const BuzzerNote (&notes)[N], uint8_t volume, BuzzerDriveMode mode) {
+    mgr->playMelody(notes, static_cast<uint8_t>(N), volume, mode);
+}
+
+void SensorManager::playScoreSound() {
+    // Flappy Bird bod (jasný retro arpeggio trojzvuk)
+    static const BuzzerNote kScoreNotes[] = {
+        { 1047, 55, 20 }, // C6
+        { 1319, 55, 20 }, // E6
+        { 1568, 95, 0  }  // G6
+    };
+    playPresetNotes(this, kScoreNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playSnakeEatSound() {
+    // Rychlé staccato pípnutí ve stylu Nokia 3310 Snake II
+    static const BuzzerNote kSnakeEatNotes[] = {
+        { 988,  35, 10 }, // B5
+        { 1480, 65, 0  }  // F#6
+    };
+    playPresetNotes(this, kSnakeEatNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playTetrisLineSound(uint8_t lines) {
+    // Smazání řady v Tetrisu (výraznější 8-bit fanfára při 4 řadách najednou)
+    if (lines >= 4) {
+        static const BuzzerNote kTetrisFourNotes[] = {
+            { 1319, 55, 12 }, // E6
+            { 988,  40, 12 }, // B5
+            { 1047, 40, 12 }, // C6
+            { 1319, 55, 12 }, // E6
+            { 1568, 55, 12 }, // G6
+            { 2093, 155, 0 }  // C7
+        };
+        playPresetNotes(this, kTetrisFourNotes, buzzerVolume, buzzerDriveMode);
+        return;
+    }
+
+    static const BuzzerNote kTetrisLineNotes[] = {
+        { 1047, 45, 12 }, // C6
+        { 1319, 45, 12 }, // E6
+        { 1568, 45, 12 }, // G6
+        { 2093, 115, 0 }  // C7
+    };
+    playPresetNotes(this, kTetrisLineNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playGameStartSound() {
+    // Krátká vzestupná znělka při ručním restartu / novém začátku hry
+    static const BuzzerNote kGameStartNotes[] = {
+        { 784,  45, 15 }, // G5
+        { 1047, 45, 15 }, // C6
+        { 1568, 90, 0  }  // G6
+    };
+    playPresetNotes(this, kGameStartNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playGameOverSound() {
+    static const BuzzerNote kGameOverNotes[] = {
+        { 659, 115, 35 }, // E5
+        { 587, 115, 35 }, // D5
+        { 523, 125, 35 }, // C5
+        { 392, 320, 0  }  // G4
+    };
+    playPresetNotes(this, kGameOverNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playHighScoreResetSound() {
+    // Odlišené neutrální potvrzení při vynulování rekordu
+    static const BuzzerNote kResetHsNotes[] = {
+        { 1047, 50, 25 }, // C6
+        { 587,  95, 0  }  // D5
+    };
+    playPresetNotes(this, kResetHsNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::playMotionAlertSound() {
+    // Jednorázové výstražné pípnutí Wi-Fi CSI radaru při přechodu z klidu do pohybu
+    static const BuzzerNote kMotionAlertNotes[] = {
+        { 2400, 65, 45 },
+        { 2400, 100, 0 }
+    };
+    playPresetNotes(this, kMotionAlertNotes, buzzerVolume, buzzerDriveMode);
+}
+
+void SensorManager::prepareBuzzerForSleep() {
+#ifdef ENABLE_BUZZER
+    stopBuzzer();
+    BuzzerHwLock lock(buzzerHwMutex);
+    if (buzzerTimer != nullptr) {
+        esp_timer_stop(buzzerTimer);
+    }
+    portENTER_CRITICAL(&buzzerMux);
+    melodyPlaying = false;
+    melodyInGap = false;
+    melodyLen = 0;
+    melodyIdx = 0;
+    portEXIT_CRITICAL(&buzzerMux);
+    applyBuzzerHardware(false, 0, 0, buzzerDriveMode);
+    buzzerSlept = true;
+    forceBuzzerPinSilent();
+    gpio_hold_en((gpio_num_t)PIN_BUZZER);
+#endif
+}
+
+void SensorManager::restoreBuzzerAfterSleep() {
+#ifdef ENABLE_BUZZER
+    gpio_hold_dis((gpio_num_t)PIN_BUZZER);
+    if (!buzzerInitialized) {
+        initBuzzer();
+        return;
+    }
+    BuzzerHwLock lock(buzzerHwMutex);
+    forceBuzzerPinSilent();
+    buzzerAttached = false;
+    buzzerSlept = false;
+#endif
 }
 
 // Sedmisegmentový displej přes posuvný registr 74HC595

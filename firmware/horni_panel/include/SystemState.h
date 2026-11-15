@@ -68,9 +68,10 @@ struct SensorData {
     uint16_t colorR, colorG, colorB;
     uint16_t colorClear;
 
-    // --- Bzučák (Stav a frekvence) ---
+    // --- Bzučák (Stav, frekvence a hlasitost) ---
     bool     buzzerActive;
     uint16_t buzzerFreq;
+    uint8_t  buzzerVolume;
 
     // --- Sedmisegmentový displej (74HC595 hodnota) ---
     int segmentValue;
@@ -179,6 +180,7 @@ public:
         bottomNeedsTx = true;
         wifiSleepPaused = false;
         memset(&sensors, 0, sizeof(SensorData));
+        sensors.buzzerVolume = 80;
         stateMutex = xSemaphoreCreateMutex();
 
         isLedOverrideActive = false;
@@ -579,10 +581,13 @@ public:
     }
 
     // Bzučák
-    void updateBuzzer(bool active, uint16_t freq = 0) {
+    void updateBuzzer(bool active, uint16_t freq = 0, uint8_t volume = 255) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             sensors.buzzerActive = active;
             sensors.buzzerFreq = freq;
+            if (volume <= 100) {
+                sensors.buzzerVolume = volume;
+            }
             xSemaphoreGive(stateMutex);
         }
     }

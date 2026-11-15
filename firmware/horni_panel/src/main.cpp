@@ -57,6 +57,78 @@ void resetHighScore(const char* key, int &bestScore) {
     Serial.printf("[HIGHSCORE] Rekord pro %s byl resetovan na 0!\n", key);
 }
 
+/**
+ * @brief Sleduje skóre, prohry a ruční restarty her pro neblokující retro zvuky bzučáku.
+ */
+struct GameAudioTracker {
+    enum ScoreMode { SCORE_NONE, SCORE_SNAKE, SCORE_POINT, SCORE_TETRIS };
+
+    int lastScore = 0;
+    bool lastGameOver = false;
+    bool initialized = false;
+    bool hsResetHeld = false;
+    unsigned long lastRestartBeepMs = 0;
+
+    void sync(int score, bool gameOver) {
+        lastScore = score;
+        lastGameOver = gameOver;
+        initialized = true;
+    }
+
+    void triggerRestart(int score, bool gameOver) {
+        sync(score, gameOver);
+        #ifdef ENABLE_BUZZER
+        unsigned long now = millis();
+        if (now - lastRestartBeepMs >= 600UL) {
+            lastRestartBeepMs = now;
+            sensorManager.playGameStartSound();
+        }
+        #endif
+    }
+
+    bool handleHighScoreReset(bool comboPressed, const char* key, int &bestScore) {
+        if (!comboPressed) {
+            hsResetHeld = false;
+            return false;
+        }
+        if (hsResetHeld) {
+            return false; // Již zpracováno při stisku kombinace CENTER + JOY
+        }
+        hsResetHeld = true;
+        resetHighScore(key, bestScore);
+        #ifdef ENABLE_BUZZER
+        lastRestartBeepMs = millis(); // Potlačí souběžný restartovní tón při držení kombinace
+        sensorManager.playHighScoreResetSound();
+        #endif
+        return true;
+    }
+
+    void update(int score, bool gameOver, bool autopilot, ScoreMode scoreMode) {
+        if (!initialized) {
+            sync(score, gameOver);
+            return;
+        }
+        #ifdef ENABLE_BUZZER
+        if (!autopilot) {
+            if (!lastGameOver && gameOver) {
+                sensorManager.playGameOverSound();
+            } else if (score > lastScore) {
+                if (scoreMode == SCORE_SNAKE) {
+                    sensorManager.playSnakeEatSound();
+                } else if (scoreMode == SCORE_POINT) {
+                    sensorManager.playScoreSound();
+                } else if (scoreMode == SCORE_TETRIS) {
+                    uint8_t lines = (score - lastScore >= 800) ? 4 : 1;
+                    sensorManager.playTetrisLineSound(lines);
+                }
+            }
+        }
+        #endif
+        lastScore = score;
+        lastGameOver = gameOver;
+    }
+};
+
 // =============================================================================
 // MODUL: KLASICKÉ BĚŽNÉ FUNKCE (CLASSIC THINGS)
 // Opakovatelné standardní obsluhy senzorů a výstupů pro většinu módů
@@ -573,6 +645,7 @@ void Task_Sensors(void *pvParameters) {
                 Serial.println("[BTN] 1s podrzeni horniho tlacitka -> SLEEP");
                 #ifdef ENABLE_BUZZER
                 sensorManager.beep(1200, 150); // Hlubší tón při uspání
+                vTaskDelay(pdMS_TO_TICKS(160)); // Necháme tón doznít před přechodem do spánku
                 #endif
                 globalState.setInfoOverlay(false);
                 globalState.setMode(MODE_SLEEP);
@@ -1050,9 +1123,9 @@ void Task_Display_UI(void *pvParameters) {
                     sensorManager.setBuiltinRgb(0, 0, 0);
                 #endif
 
-                // 4. Vypneme bzučák
+                // 4. Vypneme a bezpečně zajistíme bzučák před spánkem (HIGH = TICHO)
                 #ifdef ENABLE_BUZZER
-                    sensorManager.setBuzzer(false, 0);
+                    sensorManager.prepareBuzzerForSleep();
                 #endif
 
                 // 5. Zhasneme 7-segmentový displej
@@ -1248,6 +1321,10 @@ void Task_Display_UI(void *pvParameters) {
 
                 #if defined(PIN_TFT_LED) && (PIN_TFT_LED >= 0)
                     digitalWrite(PIN_TFT_LED, HIGH);
+                #endif
+
+                #ifdef ENABLE_BUZZER
+                    sensorManager.restoreBuzzerAfterSleep();
                 #endif
 
                 #ifdef ENABLE_LCD1602
@@ -1920,12 +1997,14 @@ void Task_Display_UI(void *pvParameters) {
                 static unsigned long lastAuto2048 = 0;
                 static unsigned long g2048_joyBtnHoldTime = 0;
                 static bool g2048_resetTriggered = false;
+                static GameAudioTracker g2048Audio;
                 unsigned long now2048 = millis();
 
                 if (needsFullRedraw) {
                     g2048.reset();
                     g2048.setBestScore(bestScore2048);
                     g2048.pohyb = true; // Vynutíme první vykreslení po startu hry
+                    g2048Audio.sync(g2048.getScore(), g2048.getState() == G2048_GAME_OVER);
                     lastG2048Action = now2048;
                 }
 
@@ -1936,8 +2015,9 @@ void Task_Display_UI(void *pvParameters) {
                     if (g2048_joyBtnHoldTime == 0) {
                         g2048_joyBtnHoldTime = now2048;
                         g2048_resetTriggered = false;
-                    } else if (!g2048_resetTriggered && (now2048 - g2048_joyBtnHoldTime >= 400)) {
+                    } else if (!g2048_resetTriggered && !data.btnDown[BTN_DOWN_CENTER] && (now2048 - g2048_joyBtnHoldTime >= 400)) {
                         g2048.reset();
+                        g2048Audio.triggerRestart(g2048.getScore(), g2048.getState() == G2048_GAME_OVER);
                         g2048.pohyb = true;
                         g2048_resetTriggered = true;
                         lastG2048Action = now2048;
@@ -1948,13 +2028,14 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 // Reset rekordu 2048 při současném stisku CENTER a JOYSTICKU:
-                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
-                    resetHighScore("2048", bestScore2048);
+                bool combo2048 = data.btnDown[BTN_DOWN_CENTER] && data.joyBtn;
+                if (g2048Audio.handleHighScoreReset(combo2048, "2048", bestScore2048)) {
                     g2048.setBestScore(bestScore2048);
                     g2048.pohyb = true;
-                } else if (data.joyBtn && !g2048_lastJoyBtn) {
+                } else if (!combo2048 && data.joyBtn && !g2048_lastJoyBtn) {
                     // Stisk samotného joysticku restartuje hru
                     g2048.reset();
+                    g2048Audio.triggerRestart(g2048.getScore(), g2048.getState() == G2048_GAME_OVER);
                     g2048.pohyb = true;
                 }
                 g2048_lastJoyBtn = data.joyBtn;
@@ -1972,7 +2053,11 @@ void Task_Display_UI(void *pvParameters) {
                     if (data.btnDown[BTN_DOWN_DOWN] && !g2048_lastBtn[BTN_DOWN_DOWN])      { g2048.moveDown();  userAction = true; }
                     if (data.btnDown[BTN_DOWN_LEFT] && !g2048_lastBtn[BTN_DOWN_LEFT])      { g2048.moveLeft();  userAction = true; }
                     if (data.btnDown[BTN_DOWN_RIGHT] && !g2048_lastBtn[BTN_DOWN_RIGHT])    { g2048.moveRight(); userAction = true; }
-                    if (data.btnDown[BTN_DOWN_CENTER] && !g2048_lastBtn[BTN_DOWN_CENTER] && !data.joyBtn) { g2048.reset(); userAction = true; }
+                    if (data.btnDown[BTN_DOWN_CENTER] && !g2048_lastBtn[BTN_DOWN_CENTER] && !data.joyBtn) {
+                        g2048.reset();
+                        g2048Audio.triggerRestart(g2048.getScore(), g2048.getState() == G2048_GAME_OVER);
+                        userAction = true;
+                    }
 
                     // Ovládání analogovým joystickem: Y < 1200 = Nahoru, Y > 2800 = Dolů, X < 1200 = Vlevo, X > 2800 = Vpravo
                     static bool joyMoved = false;
@@ -2000,6 +2085,8 @@ void Task_Display_UI(void *pvParameters) {
                     g2048.draw();
                     g2048.pohyb = false; // Sníme flag, abychom nekreslili pořád
                 }
+                g2048Audio.update(g2048.getScore(), g2048.getState() == G2048_GAME_OVER,
+                                  data.switch1, GameAudioTracker::SCORE_NONE);
                 break;
             }
 
@@ -2019,6 +2106,7 @@ void Task_Display_UI(void *pvParameters) {
                 static bool lastUpState = false;
                 static unsigned long tetris_joyBtnHoldTime = 0;
                 static bool tetris_resetTriggered = false;
+                static GameAudioTracker tetrisAudio;
                 unsigned long aktualniCas = millis();
 
                 if (needsFullRedraw) {
@@ -2029,6 +2117,7 @@ void Task_Display_UI(void *pvParameters) {
                     lastDownTime = 0;
                     wasDownHeld = false;
                     lastUpState = false;
+                    tetrisAudio.sync(tetris.getScore(), tetris.isGameOver());
                     tetris.draw();
                 }
 
@@ -2037,10 +2126,11 @@ void Task_Display_UI(void *pvParameters) {
                     if (tetris_joyBtnHoldTime == 0) {
                         tetris_joyBtnHoldTime = aktualniCas;
                         tetris_resetTriggered = false;
-                    } else if (!tetris_resetTriggered && (aktualniCas - tetris_joyBtnHoldTime >= 400)) {
+                    } else if (!tetris_resetTriggered && !data.btnDown[BTN_DOWN_CENTER] && (aktualniCas - tetris_joyBtnHoldTime >= 400)) {
                         tetris.reset();
                         casPoslednihoKroku = aktualniCas;
                         tetris_resetTriggered = true;
+                        tetrisAudio.triggerRestart(tetris.getScore(), tetris.isGameOver());
                         tetris.draw();
                     }
                 } else {
@@ -2049,13 +2139,14 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 // Reset rekordu při současném stisku tlačítka CENTER a JOYSTICKU
-                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
-                    resetHighScore("tetris", bestScoreTetris);
+                bool comboTetris = data.btnDown[BTN_DOWN_CENTER] && data.joyBtn;
+                if (tetrisAudio.handleHighScoreReset(comboTetris, "tetris", bestScoreTetris)) {
                     tetris.draw();
-                } else if (data.joyBtn && !tetris_lastJoyBtn) {
+                } else if (!comboTetris && data.joyBtn && !tetris_lastJoyBtn) {
                     // Pouze stisk joysticku samotného restartuje hru
                     tetris.reset();
                     casPoslednihoKroku = aktualniCas;
+                    tetrisAudio.triggerRestart(tetris.getScore(), tetris.isGameOver());
                     tetris.draw();
                 }
                 tetris_lastJoyBtn = data.joyBtn;
@@ -2148,6 +2239,8 @@ void Task_Display_UI(void *pvParameters) {
                     }
                 }
 
+                tetrisAudio.update(tetris.getScore(), tetris.isGameOver(),
+                                   data.switch1, GameAudioTracker::SCORE_TETRIS);
                 for (int i = 0; i < 5; i++) tetris_lastBtn[i] = data.btnDown[i];
                 break;
             }
@@ -2621,6 +2714,7 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 if (needsFullRedraw || currentStateBox != lastStateBox) {
+                    int prevStateBox = lastStateBox;
                     lastStateBox = currentStateBox;
 
                     if (currentStateBox == 3) { // ODPOJENO (Žádný mobil)
@@ -2634,6 +2728,11 @@ void Task_Display_UI(void *pvParameters) {
                         String sLeft = "Zbyva: " + String(data.wifiCsiCalibSecLeft) + "s";
                         gfx.drawTextPartial(180, 68, sLeft, ST77XX_BLACK, 0xFED7, 2);
                     } else if (currentStateBox == 2) { // POHYB DETEKOVÁN! (Červený box + ! ! !)
+                        if (prevStateBox == 0 || prevStateBox == 1) {
+                            #ifdef ENABLE_BUZZER
+                            sensorManager.playMotionAlertSound();
+                            #endif
+                        }
                         gfx.fillRect(141, 1, 178, 118, 0xFCD3); // Lososová/růžovo-červená
                         gfx.drawTextPartial(175, 42, "!  !  !", 0xF800, 0xFCD3, 4); // Velké červené vykřičníky
                     } else { // KLID / OK
@@ -3271,8 +3370,10 @@ void Task_Display_UI(void *pvParameters) {
             
             // =======================================================
             case MODE_GAME_SNAKE: {
+                static GameAudioTracker snakeAudio;
                 if (needsFullRedraw) {
                     snake.reset();
+                    snakeAudio.sync(snake.getScore(), snake.isGameOver());
                 }
                 unsigned long aktualniCas = millis();
                 delay = 10;
@@ -3290,8 +3391,9 @@ void Task_Display_UI(void *pvParameters) {
                     if (snake_joyBtnHoldTime == 0) {
                         snake_joyBtnHoldTime = aktualniCas;
                         snake_resetTriggered = false;
-                    } else if (!snake_resetTriggered && (aktualniCas - snake_joyBtnHoldTime >= 400)) {
+                    } else if (!snake_resetTriggered && !data.btnDown[BTN_DOWN_CENTER] && (aktualniCas - snake_joyBtnHoldTime >= 400)) {
                         snake.reset();
+                        snakeAudio.triggerRestart(snake.getScore(), snake.isGameOver());
                         snake_resetTriggered = true;
                         lastSnakeAction = aktualniCas;
                     }
@@ -3337,12 +3439,14 @@ void Task_Display_UI(void *pvParameters) {
                 }
                 // Restart hry po Game Over stiskem středového tlačítka (CENTER / BTN2) nebo joysticku
                 // Reset rekordu při současném stisku CENTER a JOYSTICKU:
-                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
-                    resetHighScore("snake", bestScoreSnake);
-                } else if ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || (data.joyBtn && !snake_lastJoyBtn)) {
+                bool comboSnake = data.btnDown[BTN_DOWN_CENTER] && data.joyBtn;
+                if (snakeAudio.handleHighScoreReset(comboSnake, "snake", bestScoreSnake)) {
+                    // Rekord vynulovan (NVS i zvuk)
+                } else if (!comboSnake && ((data.btnDown[BTN_DOWN_CENTER] && !snake_lastBtn[BTN_DOWN_CENTER]) || (data.joyBtn && !snake_lastJoyBtn))) {
                     lastSnakeAction = aktualniCas;
                     if (snake.isGameOver()) {
                         snake.reset();
+                        snakeAudio.triggerRestart(snake.getScore(), snake.isGameOver());
                     }
                 }
                 snake_lastJoyBtn = data.joyBtn;
@@ -3355,6 +3459,8 @@ void Task_Display_UI(void *pvParameters) {
                     }
                     casPoslednihoKroku = aktualniCas;
                     snake.update();
+                    snakeAudio.update(snake.getScore(), snake.isGameOver(),
+                                      data.switch1, GameAudioTracker::SCORE_SNAKE);
                     if(!data.switch1){
                         checkAndUpdateHighScore("snake", snake.getScore(), bestScoreSnake);
                     }
@@ -3365,9 +3471,11 @@ void Task_Display_UI(void *pvParameters) {
             
             // =======================================================
             case MODE_GAME_FLAPPY: {
+                static GameAudioTracker flappyAudio;
                 if (needsFullRedraw) {
                     flappy.reset();
                     flappy.setBestScore(bestScoreFlappy);
+                    flappyAudio.sync(flappy.getScore(), flappy.getGameOver());
                     flappy.draw();
                 }
                 unsigned long aktualniCasFlappy = millis();
@@ -3383,9 +3491,10 @@ void Task_Display_UI(void *pvParameters) {
                     if (flappy_joyBtnHoldTime == 0) {
                         flappy_joyBtnHoldTime = aktualniCasFlappy;
                         flappy_resetTriggered = false;
-                    } else if (!flappy_resetTriggered && (aktualniCasFlappy - flappy_joyBtnHoldTime >= 400)) {
+                    } else if (!flappy_resetTriggered && !data.btnDown[BTN_DOWN_CENTER] && (aktualniCasFlappy - flappy_joyBtnHoldTime >= 400)) {
                         flappy.reset();
                         flappy.setBestScore(bestScoreFlappy);
+                        flappyAudio.triggerRestart(flappy.getScore(), flappy.getGameOver());
                         flappy_resetTriggered = true;
                         lastFlappyAction = aktualniCasFlappy;
                         flappy.draw();
@@ -3396,19 +3505,20 @@ void Task_Display_UI(void *pvParameters) {
                 }
 
                 // Skok nebo restart hry při stisku kteréhokoliv tlačítka D-Padu, joysticku nebo horního tlačítka
-                if (data.btnDown[BTN_DOWN_CENTER] && data.joyBtn) {
-                    resetHighScore("flappy", bestScoreFlappy);
+                bool comboFlappy = data.btnDown[BTN_DOWN_CENTER] && data.joyBtn;
+                if (flappyAudio.handleHighScoreReset(comboFlappy, "flappy", bestScoreFlappy)) {
                     flappy.setBestScore(bestScoreFlappy);
                     flappy.draw();
                 }
                 bool jumpPress = (data.btnDown[BTN_DOWN_UP] || data.btnDown[BTN_DOWN_CENTER] ||
                                   data.btnDown[BTN_DOWN_LEFT] || data.btnDown[BTN_DOWN_RIGHT] ||
                                   data.btnDown[BTN_DOWN_DOWN] || data.joyBtn || data.btnTop);
-                if (jumpPress && !flappy_lastBtn) {
+                if (!comboFlappy && jumpPress && !flappy_lastBtn) {
                     lastFlappyAction = aktualniCasFlappy;
                     if (flappy.getGameOver()) {
                         flappy.reset();
                         flappy.setBestScore(bestScoreFlappy);
+                        flappyAudio.triggerRestart(flappy.getScore(), flappy.getGameOver());
                     } else {
                         flappy.jump();
                     }
@@ -3421,6 +3531,8 @@ void Task_Display_UI(void *pvParameters) {
                         flappy.autoStep(); // AI Autopilot na Switch 1
                     }
                     flappy.update();
+                    flappyAudio.update(flappy.getScore(), flappy.getGameOver(),
+                                       data.switch1, GameAudioTracker::SCORE_POINT);
                     if (!data.switch1) {
                         checkAndUpdateHighScore("flappy", flappy.getScore(), bestScoreFlappy);
                     }

@@ -177,9 +177,13 @@
 //  VÝSTUPY (Bzučák, LED diody a pásek)
 // =============================================================================
 // V kódu v setup(): pinMode(PIN_..., OUTPUT);
-#define PIN_BUZZER            7   // Bzučák (aktivní LOW / ticho na HIGH)
-#define BUZZER_SILENT_LEVEL  HIGH // Úroveň pro TICHO (HIGH = ticho při PNP/invertovaném spínání)
-#define BUZZER_ACTIVE_LEVEL  LOW  // Úroveň pro TÓN/PÍPNUTÍ (LOW = sepnuto)
+#define PIN_BUZZER             7     // Bzučák (aktivní LOW / ticho na HIGH)
+#define BUZZER_SILENT_LEVEL    HIGH  // Úroveň pro TICHO (HIGH = ticho při PNP/invertovaném spínání)
+#define BUZZER_ACTIVE_LEVEL    LOW   // Úroveň pro TÓN/PÍPNUTÍ (LOW = sepnuto)
+#define LEDC_CHAN_BUZZER       6     // Samostatný LEDC PWM kanál (Timer 3, mimo TCS_LED na kanálu 4)
+#define BUZZER_LEDC_RES        10    // 10-bit rozlišení (0..1023 -> 40 Hz až 35 kHz i jemná regulace hlasitosti)
+#define BUZZER_PWM_CARRIER_HZ  18000 // Vysokofrekvenční nosná pro PWM regulaci výkonu aktivního bzučáku
+#define BUZZER_DEFAULT_VOLUME  80    // Výchozí hlasitost bzučáku (0 až 100 %)
 #define PIN_LED_IR           39   // LED D1 (nad IR senzorem)
 #define PIN_LED_ULT          40   // LED D4 (nad Ultrazvukem)
 #define PIN_LED_LASER        41   // LED D5 (nad Laserem)
