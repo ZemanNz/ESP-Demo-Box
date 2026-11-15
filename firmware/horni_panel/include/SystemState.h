@@ -145,6 +145,7 @@ private:
     AppMode lastMode;
     int menuCursorIndex;
     bool infoActive;
+    uint8_t infoPage;
     int32_t lastProcessedEncoderPos;
     SensorData sensors;
     bool uiNeedsUpdate;
@@ -176,6 +177,7 @@ public:
         lastMode = MODE_MAIN_MENU;
         menuCursorIndex = 0;
         infoActive = false;
+        infoPage = 0;
         lastProcessedEncoderPos = 0;
         uiNeedsUpdate = true;
         bottomNeedsTx = true;
@@ -233,6 +235,15 @@ public:
         return active;
     }
 
+    uint8_t getInfoPage() {
+        uint8_t page = 0;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            page = infoPage;
+            xSemaphoreGive(stateMutex);
+        }
+        return page;
+    }
+
     int getMenuCursorIndex() {
         int idx = 0;
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
@@ -281,6 +292,7 @@ public:
             }
             currentMode = newMode;
             infoActive = false; // Při změně módu zavřeme případné info
+            infoPage = 0;
             uiNeedsUpdate = true;
             bottomNeedsTx = true;
             xSemaphoreGive(stateMutex);
@@ -290,14 +302,47 @@ public:
     void setInfoOverlay(bool active) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             infoActive = active;
+            if (!active) {
+                infoPage = 0;
+            } else if (infoPage == 0) {
+                infoPage = 1;
+            }
             uiNeedsUpdate = true;
             xSemaphoreGive(stateMutex);
         }
     }
 
+    void setInfoPage(uint8_t page) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            infoPage = page;
+            infoActive = (page != 0);
+            uiNeedsUpdate = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    uint8_t cycleInfoPage() {
+        uint8_t next = 1;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            if (!infoActive || infoPage < 1) {
+                next = 1;
+            } else if (infoPage == 1) {
+                next = 2;
+            } else {
+                next = 0;
+            }
+            infoPage = next;
+            infoActive = (next != 0);
+            uiNeedsUpdate = true;
+            xSemaphoreGive(stateMutex);
+        }
+        return next;
+    }
+
     void prepniInfoOverlay() {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             infoActive = !infoActive;
+            infoPage = infoActive ? 1 : 0;
             uiNeedsUpdate = true;
             xSemaphoreGive(stateMutex);
         }

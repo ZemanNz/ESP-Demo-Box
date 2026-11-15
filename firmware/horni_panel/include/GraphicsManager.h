@@ -6,6 +6,14 @@
 #define ST77XX_DARKGREY 0x4208
 
 /**
+ * @brief Jeden radek univerzalniho INFO overlay (azurovy stitek + bily popis).
+ */
+struct InfoLine {
+    const char* tag;
+    const char* body;
+};
+
+/**
  * @brief Globální správce grafiky pro horní panel (TFT displej)
  */
 class GraphicsManager {
@@ -63,6 +71,13 @@ public:
     void drawArrow(int x0, int y0, int x1, int y1, int headSize, uint16_t color);
     void drawColorWheel(int cx, int cy, int radius, bool drawBorder = true);
     void drawQRCode(int startX, int startY, int moduleSize = 6);
+
+    // -------------------------------------------------------------
+    // Kompletní obrazovky a překryvná okna (Světelný mód, INFO)
+    // -------------------------------------------------------------
+    static constexpr int INFO_VISIBLE_ROWS = 6;
+    void drawLightMode(uint16_t rawPhotoL, uint16_t rawPhotoR, float smoothL, float smoothR, unsigned long nowMs, bool redrawFallback = false);
+    void drawInfoOverlay(const char* title, uint8_t page, const InfoLine* lines, int totalRows, int scrollOffset);
 
     // -------------------------------------------------------------
     // METODA 2: Kompletní Double-Buffering přes PSRAM
