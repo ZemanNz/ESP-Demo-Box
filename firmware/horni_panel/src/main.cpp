@@ -231,11 +231,14 @@ void Task_WiFi_Web(void *pvParameters) {
     for (;;) {
         AppMode currentMode = globalState.getMode();
         if (currentMode == MODE_SLEEP) {
+            if (!globalState.isWifiSleepPaused()) {
+                webManager.update(); // Bezpečně zastaví CSI/promiskuitní RX na Core 0 a nastaví flag
+            }
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
         webManager.update();
-        vTaskDelay(pdMS_TO_TICKS(15));
+        vTaskDelay(pdMS_TO_TICKS(currentMode == MODE_WIFI_DETECTION ? 10 : 15));
     }
 }
 
@@ -831,10 +834,48 @@ void Task_Sensors(void *pvParameters) {
             }
 
             // =======================================================
+            case MODE_WIFI_DETECTION: {
+                handleClassicSensors(now);
+                SensorData wifiDetData = globalState.getSensorData();
+                static bool lastWifiDetJoyBtn = false;
+                static unsigned long lastWifiDetTickMs = 0;
+                if (now - lastWifiDetTickMs > 200) {
+                    lastWifiDetJoyBtn = wifiDetData.joyBtn;
+                }
+                lastWifiDetTickMs = now;
+                if (wifiDetData.joyBtn && !lastWifiDetJoyBtn &&
+                    !globalState.isInfoActive() &&
+                    wifiDetData.wifiStationsCount > 0 && !wifiDetData.wifiCsiCalibrating) {
+                    #ifdef ENABLE_BUZZER
+                    sensorManager.beep(2000, 50);
+                    #endif
+                    globalState.requestWifiCalibration();
+                }
+                lastWifiDetJoyBtn = wifiDetData.joyBtn;
+                break;
+            }
+            case MODE_WIFI_SPOJENI: {
+                handleClassicSensors(now);
+                SensorData wifiConnData = globalState.getSensorData();
+                static bool lastWifiConnJoyBtn = false;
+                static unsigned long lastWifiConnTickMs = 0;
+                if (now - lastWifiConnTickMs > 200) {
+                    lastWifiConnJoyBtn = wifiConnData.joyBtn;
+                }
+                lastWifiConnTickMs = now;
+                if (wifiConnData.joyBtn && !lastWifiConnJoyBtn &&
+                    !globalState.isInfoActive() &&
+                    wifiConnData.wifiStationsCount > 0 && !wifiConnData.wifiRssi1mCalibrating) {
+                    #ifdef ENABLE_BUZZER
+                    sensorManager.beep(1800, 60);
+                    #endif
+                    globalState.requestRssi1mCalibration();
+                }
+                lastWifiConnJoyBtn = wifiConnData.joyBtn;
+                break;
+            }
             case MODE_MAIN_MENU:
             case MODE_VZDALENOST:
-            case MODE_WIFI_SPOJENI:
-            case MODE_WIFI_DETECTION:
             case MODE_SERVA:
             case MODE_DOCS:
             case MODE_BAREVNY:
@@ -895,11 +936,14 @@ void Task_Display_UI(void *pvParameters) {
     Serial.print("Task_Display_UI bezi na uvazku (Core): ");
     Serial.println(xPortGetCoreID());
     unsigned long casPoslednihoKroku = 0;
+    AppMode prevDisplayMode = MODE_SLEEP;
     byte delay = 50; // Defaultní zpoždění mezi překresleními (20 fps)
 
     for (;;) {
         // 1. Zjistíme, v jakém stavu se kufr zrovna nachází
         AppMode currentMode = globalState.getMode();
+        bool modeJustChanged = (currentMode != prevDisplayMode);
+        prevDisplayMode = currentMode;
 
         // 2. Potřebujeme kompletně překreslit obrazovku? 
         // (Vlajka je true jen těsně po přepnutí stavu nebo stisku tlačítka)
@@ -1068,8 +1112,13 @@ void Task_Display_UI(void *pvParameters) {
                 #endif
                 #endif
 
-                // 9. Vypneme Wi-Fi rádio před spánkem (běžící Wi-Fi AP by periodicky budil light sleep)
+                // 9. Počkáme na bezpečné pozastavení CSI/promiskuitního RX v Core 0 a vypneme Wi-Fi před spánkem
                 #ifdef ENABLE_WIFI_WEB
+                for (int w = 0; w < 30 && !globalState.isWifiSleepPaused(); w++) {
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                esp_wifi_set_csi(false);
+                esp_wifi_set_promiscuous(false);
                 esp_wifi_stop();
                 vTaskDelay(pdMS_TO_TICKS(50));
                 #endif
@@ -1350,9 +1399,9 @@ void Task_Display_UI(void *pvParameters) {
                     // 2. ŽIVÁ DATA A PŘEKRESLENÍ POUZE PŘI ZMĚNĚ
                     // -------------------------------------------------------------
 
-                    // A) TOP BAR: Wi-Fi stav a počet klientů
+                    // A) TOP BAR: Wi-Fi stav a počet klientů (čteme bezpečně ze SystemState bez křížení jader)
                     #ifdef ENABLE_WIFI_WEB
-                        uint8_t stations = WiFi.softAPgetStationNum();
+                        uint8_t stations = data.wifiStationsCount;
                     #else
                         uint8_t stations = 0;
                     #endif
@@ -2328,14 +2377,21 @@ void Task_Display_UI(void *pvParameters) {
                 delay = 100; // 10 fps
                 SensorData data = globalState.getSensorData();
                 uint8_t stations = data.wifiStationsCount;
-                float estDist = data.wifiDistanceM;
                 static uint8_t lastStations = 255;
-                static int lastDistInt = -999;
+                static int lastDistTenths[SensorData::MAX_WIFI_STATIONS] = {-999, -999, -999, -999};
+                static int8_t lastRssi[SensorData::MAX_WIFI_STATIONS] = {-120, -120, -120, -120};
+                static bool lastStale[SensorData::MAX_WIFI_STATIONS] = {false, false, false, false};
+                static int lastCalib1m = -1;
 
                 // A) STATICKÁ MASKA (Vykreslí se pouze 1x při vstupu do módu)
                 if (needsFullRedraw) {
                     lastStations = 255;
-                    lastDistInt = -999;
+                    lastCalib1m = -1;
+                    for (uint8_t i = 0; i < SensorData::MAX_WIFI_STATIONS; i++) {
+                        lastDistTenths[i] = -999;
+                        lastRssi[i] = -120;
+                        lastStale[i] = false;
+                    }
 
                     // 1. Levý panel (béžovo-oranžový 0xFED7, 0..105 px)
                     gfx.fillRect(0, 0, 106, 240, 0xFED7);
@@ -2352,37 +2408,129 @@ void Task_Display_UI(void *pvParameters) {
 
                     // 5. Statické popisky
                     gfx.drawTextPartial(26, 110, "zarizeni:", ST77XX_BLACK, 0xFED7, 1);
-                    gfx.drawTextPartial(16, 168, "VZDALENOST:", ST77XX_BLACK, 0xFED7, 1);
+                    gfx.drawTextPartial(16, 152, "VZDALENOST:", ST77XX_BLACK, 0xFED7, 1);
 
                     // 6. QR kód vycentrovaný na pravém panelu (29x29 modulů, scale=6 -> 174x174 px)
                     gfx.drawQRCode(126, 33, 6);
                 }
 
-                // B) DYNAMICKÁ ČÁST (Reálná data ze SystemState)
-                int distInt = (int)(estDist * 10.0f);
-                if (needsFullRedraw || stations != lastStations || distInt != lastDistInt) {
+                // B) DYNAMICKÁ ČÁST (Individuální vzdálenost pro každé připojené zařízení)
+                int curDistTenths[SensorData::MAX_WIFI_STATIONS];
+                int8_t curRssi[SensorData::MAX_WIFI_STATIONS];
+                bool curStale[SensorData::MAX_WIFI_STATIONS];
+                bool curCalib1m = data.wifiRssi1mCalibrating;
+                bool infoChanged = needsFullRedraw || (stations != lastStations);
+
+                for (uint8_t i = 0; i < SensorData::MAX_WIFI_STATIONS; i++) {
+                    if (i < stations && data.wifiStationActive[i] && data.wifiStationDistM[i] > 0.1f) {
+                        float dM = data.wifiStationDistM[i];
+                        if (lastDistTenths[i] <= 0 || fabsf(dM - (lastDistTenths[i] / 10.0f)) >= 0.08f) {
+                            curDistTenths[i] = (int)lroundf(dM * 10.0f);
+                        } else {
+                            curDistTenths[i] = lastDistTenths[i];
+                        }
+                        curRssi[i] = data.wifiStationRssi[i];
+                        curStale[i] = data.wifiStationStale[i];
+                    } else {
+                        curDistTenths[i] = 0;
+                        curRssi[i] = -100;
+                        curStale[i] = false;
+                    }
+
+                    if (curDistTenths[i] != lastDistTenths[i] ||
+                        abs((int)curRssi[i] - (int)lastRssi[i]) >= 2 ||
+                        curStale[i] != lastStale[i]) {
+                        infoChanged = true;
+                    }
+                }
+
+                if (infoChanged) {
+                    bool countChanged = needsFullRedraw || (stations != lastStations);
                     lastStations = stations;
-                    lastDistInt = distInt;
+                    for (uint8_t i = 0; i < SensorData::MAX_WIFI_STATIONS; i++) {
+                        lastDistTenths[i] = curDistTenths[i];
+                        lastRssi[i] = curRssi[i];
+                        lastStale[i] = curStale[i];
+                    }
 
                     uint16_t wifiColor = (stations > 0) ? 0x07E0 : 0xF800; // Zelená při připojení, červená při 0
 
-                    // 1. Překreslení Wi-Fi ikony vlevo nahoře
-                    gfx.fillRect(20, 46, 66, 48, 0xFED7); // Vyčištění prostoru ikony
-                    gfx.drawWifiIcon(53, 65, wifiColor, 0xFED7);
+                    if (countChanged) {
+                        // 1. Překreslení Wi-Fi ikony a počtu zařízení
+                        gfx.fillRect(20, 46, 66, 48, 0xFED7);
+                        gfx.drawWifiIcon(53, 65, wifiColor, 0xFED7);
 
-                    // 2. Počet připojených zařízení
-                    String sCount = String(stations);
-                    int wCount = sCount.length() * 12;
-                    gfx.fillRect(20, 124, 66, 22, 0xFED7);
-                    gfx.drawTextPartial(53 - wCount / 2, 126, sCount, wifiColor, 0xFED7, 2);
+                        String sCount = String(stations);
+                        int wCount = sCount.length() * 12;
+                        gfx.fillRect(20, 124, 66, 22, 0xFED7);
+                        gfx.drawTextPartial(53 - wCount / 2, 126, sCount, wifiColor, 0xFED7, 2);
+                    }
 
-                    // 3. Reálná vzdálenost z RSSI
-                    String sDist = (stations > 0 && estDist > 0.1f) ? (String(estDist, 1) + "m") : "---";
-                    int wDist = sDist.length() * 12;
-                    gfx.fillRect(6, 184, 94, 22, 0xFED7);
-                    gfx.drawTextPartial(53 - wDist / 2, 186, sDist, ST77XX_BLACK, 0xFED7, 2);
+                    // 2. Zobrazení vzdáleností pro 0 / 1 / 2 / 3-4 telefony (horní část y=162..220)
+                    gfx.fillRect(2, 162, 103, 59, 0xFED7);
 
-                    // Obnova oddělovací linky
+                    auto formatDist = [](int tenths, bool stale, bool allowLongDec) -> String {
+                        if (tenths <= 0) return "---";
+                        if (tenths >= 150) return stale ? ">15m?" : ">15m";
+                        if (!allowLongDec && tenths >= 100 && stale) {
+                            return "~" + String((int)((tenths + 5) / 10)) + "m?";
+                        }
+                        String s = "~" + String(tenths / 10.0f, 1) + "m";
+                        if (stale) s += "?";
+                        return s;
+                    };
+
+                    if (stations == 0) {
+                        String sNone = "---";
+                        int wNone = sNone.length() * 12;
+                        gfx.drawTextPartial(53 - wNone / 2, 184, sNone, ST77XX_BLACK, 0xFED7, 2);
+                    } else if (stations == 1) {
+                        String sDist = formatDist(curDistTenths[0], curStale[0], true);
+                        int wDist = sDist.length() * 12;
+                        uint16_t txtCol = curStale[0] ? 0x8410 : ST77XX_BLACK;
+                        gfx.drawTextPartial(53 - wDist / 2, 172, sDist, txtCol, 0xFED7, 2);
+
+                        if (curRssi[0] < 0 && curRssi[0] > -98) {
+                            String sRssi = String((int)curRssi[0]) + (curStale[0] ? " dBm?" : " dBm");
+                            int wRssi = sRssi.length() * 6;
+                            gfx.drawTextPartial(53 - wRssi / 2, 198, sRssi, 0x4208, 0xFED7, 1);
+                        }
+                    } else if (stations == 2) {
+                        for (uint8_t i = 0; i < 2; i++) {
+                            String row = String(i + 1) + ":" + formatDist(curDistTenths[i], curStale[i], false);
+                            int wRow = row.length() * 12;
+                            uint16_t txtCol = curStale[i] ? 0x8410 : ST77XX_BLACK;
+                            gfx.drawTextPartial(53 - wRow / 2, 164 + i * 22, row, txtCol, 0xFED7, 2);
+                        }
+                        if (curRssi[0] > -98 && curRssi[1] > -98) {
+                            String rssiLine = String((int)curRssi[0]) + "/" + String((int)curRssi[1]) + "dBm";
+                            int wRssi = rssiLine.length() * 6;
+                            gfx.drawTextPartial(53 - wRssi / 2, 210, rssiLine, 0x4208, 0xFED7, 1);
+                        }
+                    } else {
+                        for (uint8_t i = 0; i < stations && i < SensorData::MAX_WIFI_STATIONS; i++) {
+                            String row = String(i + 1) + ":" + formatDist(curDistTenths[i], curStale[i], true);
+                            if (curRssi[i] > -98 && curRssi[i] < 0) {
+                                row += " " + String((int)curRssi[i]) + "dB";
+                            }
+                            uint16_t txtCol = curStale[i] ? 0x8410 : ST77XX_BLACK;
+                            gfx.drawTextPartial(8, 163 + i * 15, row, txtCol, 0xFED7, 1);
+                        }
+                    }
+
+                    // Obnova oddělovací linky a spodního okraje
+                    gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
+                }
+
+                // Spodní nápověda / stav 1m kalibrace (y=223..237)
+                if (needsFullRedraw || (int)curCalib1m != lastCalib1m) {
+                    lastCalib1m = (int)curCalib1m;
+                    gfx.fillRect(2, 223, 103, 15, 0xFED7);
+                    const char *hint = curCalib1m ? "KALIB. 1m..." : "[Joy:Kal.1m]";
+                    uint16_t hintCol = curCalib1m ? 0x001F : 0x4208;
+                    int wHint = (int)strlen(hint) * 6;
+                    gfx.drawTextPartial(53 - wHint / 2, 226, hint, hintCol, 0xFED7, 1);
+                    gfx.drawRect(0, 0, 320, 240, ST77XX_BLACK);
                     gfx.drawLine(106, 0, 106, 239, ST77XX_BLACK);
                 }
                 break;
@@ -2396,21 +2544,36 @@ void Task_Display_UI(void *pvParameters) {
                 SensorData data = globalState.getSensorData();
 
                 static float histCsi[60]; // 60 vzorků (1 vzorek za sekundu = 1 minuta historie)
+                static float periodPeakCsi = 1.0f;
                 static unsigned long lastCsiSampleTime = 0;
                 static bool csiGraphInit = false;
                 static int lastStateBox = -1; // 0 = kalibrace, 1 = klid, 2 = pohyb, 3 = odpojeno
+                static uint8_t lastCalibSec = 255;
                 static bool lastHasClient = false;
+                static uint8_t lastDetStations = 255;
 
                 bool hasClient = (data.wifiStationsCount > 0);
+                unsigned long now = millis();
+
+                if (!csiGraphInit || modeJustChanged || !hasClient) {
+                    for (int i = 0; i < 60; i++) histCsi[i] = 1.0f;
+                    csiGraphInit = true;
+                    periodPeakCsi = 1.0f;
+                    lastCsiSampleTime = now;
+                }
+
+                if (hasClient && data.wifiMotionMetric > periodPeakCsi) {
+                    periodPeakCsi = data.wifiMotionMetric;
+                }
+
+                bool clientAppeared = (hasClient && !lastHasClient);
 
                 // A) STATICKÁ MASKA
                 if (needsFullRedraw || hasClient != lastHasClient) {
                     lastHasClient = hasClient;
+                    lastDetStations = 255;
                     lastStateBox = -1;
-                    if (!csiGraphInit) {
-                        for (int i = 0; i < 60; i++) histCsi[i] = 1.0f;
-                        csiGraphInit = true;
-                    }
+                    lastCalibSec = 255;
 
                     // 1. Bílé pozadí
                     gfx.fillRect(0, 0, 320, 240, ST77XX_WHITE);
@@ -2436,6 +2599,15 @@ void Task_Display_UI(void *pvParameters) {
                     }
                 }
 
+                // B) DYNAMICKÁ ČÁST 0 - Stav připojených telefonů v levém horním poli
+                if (needsFullRedraw || data.wifiStationsCount != lastDetStations) {
+                    lastDetStations = data.wifiStationsCount;
+                    gfx.fillRect(10, 86, 124, 30, ST77XX_WHITE);
+                    String sCnt = "Zarizeni: " + String(data.wifiStationsCount);
+                    gfx.drawTextPartial(16, 88, sCnt, hasClient ? 0x03E0 : 0xF800, ST77XX_WHITE, 1);
+                    gfx.drawTextPartial(16, 102, "[Joy: Kalib.]", hasClient ? 0x001F : 0x8410, ST77XX_WHITE, 1);
+                }
+
                 // B) DYNAMICKÁ ČÁST 1 - HORNÍ VÝSTRAŽNÝ / STAVOVÝ BOX (Vpravo nahoře)
                 int currentStateBox;
                 if (!hasClient) {
@@ -2456,6 +2628,7 @@ void Task_Display_UI(void *pvParameters) {
                         gfx.drawTextPartial(158, 38, "ZADNY MOBIL", 0xF800, 0xFED7, 2);
                         gfx.drawTextPartial(170, 68, "Odpojeno", ST77XX_BLACK, 0xFED7, 2);
                     } else if (currentStateBox == 0) { // KALIBRACE
+                        lastCalibSec = data.wifiCsiCalibSecLeft;
                         gfx.fillRect(141, 1, 178, 118, 0xFED7); // Světle oranžová/žlutá
                         gfx.drawTextPartial(168, 38, "KALIBRACE...", ST77XX_BLACK, 0xFED7, 2);
                         String sLeft = "Zbyva: " + String(data.wifiCsiCalibSecLeft) + "s";
@@ -2469,21 +2642,30 @@ void Task_Display_UI(void *pvParameters) {
                     }
                     gfx.drawLine(140, 0, 140, 120, ST77XX_BLACK);
                     gfx.drawLine(0, 120, 319, 120, ST77XX_BLACK);
+                } else if (currentStateBox == 0 && data.wifiCsiCalibSecLeft != lastCalibSec) {
+                    lastCalibSec = data.wifiCsiCalibSecLeft;
+                    gfx.fillRect(142, 62, 174, 30, 0xFED7);
+                    String sLeft = "Zbyva: " + String(data.wifiCsiCalibSecLeft) + "s";
+                    gfx.drawTextPartial(180, 68, sLeft, ST77XX_BLACK, 0xFED7, 2);
                 }
 
-                // C) DYNAMICKÁ ČÁST 2 - 60SEKUNDOVÝ DVOJBAREVNÝ GRAF (Prahová detekce - pouze při připojeném telefonu)
+                // C) DYNAMICKÁ ČÁST 2 - 60SEKUNDOVÝ DVOJBAREVNÝ GRAF (Peak-hold 1 s vzorky, bez extra posunu při překreslení)
                 if (hasClient) {
-                    unsigned long now = millis();
-                    if (needsFullRedraw || (now - lastCsiSampleTime >= 1000)) { // 1 vzorek za sekundu = 60s graf
+                    bool drawGraphNow = needsFullRedraw || clientAppeared;
+                    if (now - lastCsiSampleTime >= 1000) { // 1 vzorek za sekundu = 60s graf
                         lastCsiSampleTime = now;
 
                         // Posun historie
                         for (int i = 0; i < 59; i++) {
                             histCsi[i] = histCsi[i + 1];
                         }
-                        histCsi[59] = data.wifiMotionMetric;
+                        histCsi[59] = (periodPeakCsi > data.wifiMotionMetric) ? periodPeakCsi : data.wifiMotionMetric;
+                        periodPeakCsi = data.wifiMotionMetric;
+                        drawGraphNow = true;
+                    }
 
-                        float thresh = (data.wifiThreshold > 0.5f) ? data.wifiThreshold : 2.5f;
+                    if (drawGraphNow) {
+                        float thresh = (data.wifiThreshold > 0.1f) ? data.wifiThreshold : 2.4f;
                         int yThresh = 236 - (int)(constrain(thresh, 0.0f, 8.0f) * 11.0f);
                         yThresh = constrain(yThresh, 128, 234);
 

@@ -116,15 +116,22 @@ struct SensorData {
     bool switch2;
 
     // --- Wi-Fi Telemetrie & CSI Radar ---
-    uint8_t wifiStationsCount;    // Počet připojených zařízení (0 až 4)
-    int8_t  wifiRssi;             // Síla signálu telefonu v dBm
-    float   wifiDistanceM;        // Spočítaná vzdálenost v metrech
-    bool    wifiCsiCalibrating;   // Probíhá kalibrace radaru
-    uint8_t wifiCsiCalibSecLeft;  // Zbývající sekundy kalibrace (5.. 1.. 0)
-    float   wifiMotionMetric;     // Živá hodnota pohybu (0.5 = klid, 4.0+ = pohyb)
-    float   wifiThreshold;        // Prahová úroveň detekce
-    bool    wifiMotionDetected;   // True = překročen práh detekce (poplach)
-    bool    wifiCalibRequested;   // Příznak požadavku na novou kalibraci
+    static constexpr uint8_t MAX_WIFI_STATIONS = 4;
+    uint8_t wifiStationsCount;                     // Počet připojených zařízení (0 až 4)
+    int8_t  wifiRssi;                              // Síla signálu primárního/nejbližšího telefonu v dBm
+    float   wifiDistanceM;                         // Nejkratší / primární vzdálenost v metrech
+    int8_t  wifiStationRssi[MAX_WIFI_STATIONS];    // Individuální filtrované RSSI pro každý telefon [dBm]
+    float   wifiStationDistM[MAX_WIFI_STATIONS];   // Individuální odhad vzdálenosti pro každý telefon [m]
+    bool    wifiStationActive[MAX_WIFI_STATIONS];  // True = slot obsazen aktivně připojeným telefonem
+    bool    wifiStationStale[MAX_WIFI_STATIONS];   // True = ze stanice nepřišel čerstvý RX paket (>3.5s)
+    bool    wifiCsiCalibrating;                    // Probíhá kalibrace radaru
+    uint8_t wifiCsiCalibSecLeft;                   // Zbývající sekundy kalibrace (5.. 1.. 0)
+    float   wifiMotionMetric;                      // Živá hodnota pohybu (1.0 = klid, 2.4+ = práh)
+    float   wifiThreshold;                         // Prahová úroveň detekce
+    bool    wifiMotionDetected;                    // True = překročen práh detekce (poplach)
+    bool    wifiCalibRequested;                    // Příznak požadavku na novou CSI kalibraci
+    bool    wifiRssi1mCalibrating;                 // Probíhá kalibrace referenčního 1m RSSI
+    bool    wifiRssi1mCalibRequested;              // Příznak požadavku na kalibraci 1m RSSI
 };
 
 // ---------------------------------------------------------
@@ -140,6 +147,7 @@ private:
     SensorData sensors;
     bool uiNeedsUpdate;
     bool bottomNeedsTx;
+    bool wifiSleepPaused;
     SemaphoreHandle_t stateMutex;
 
     // --- Vzdálené řízení (Wi-Fi Override) vs automatika senzorů ---
@@ -169,6 +177,7 @@ public:
         lastProcessedEncoderPos = 0;
         uiNeedsUpdate = true;
         bottomNeedsTx = true;
+        wifiSleepPaused = false;
         memset(&sensors, 0, sizeof(SensorData));
         stateMutex = xSemaphoreCreateMutex();
 
@@ -250,7 +259,7 @@ public:
         return needsUpdate;
     }    
     SensorData getSensorData() {
-        SensorData dataCopy;
+        SensorData dataCopy{};
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             dataCopy = sensors;
             xSemaphoreGive(stateMutex);
@@ -587,16 +596,38 @@ public:
     }
 
     // --- Wi-Fi Telemetrie & CSI Radar ---
-    void updateWifiMetrics(uint8_t stations, int8_t rssi, float distanceM, bool calibrating, uint8_t secLeft, float metric, float threshold, bool motionDetected) {
+    void updateWifiMetrics(uint8_t stations, int8_t rssi, float distanceM,
+                           const int8_t* stationRssi, const float* stationDistM,
+                           const bool* stationActive, uint8_t slotCount,
+                           bool calibrating, uint8_t secLeft, float metric,
+                           float threshold, bool motionDetected,
+                           const bool* stationStale = nullptr,
+                           bool rssi1mCalibrating = false) {
         if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
             sensors.wifiStationsCount = stations;
             sensors.wifiRssi = rssi;
             sensors.wifiDistanceM = distanceM;
+            for (uint8_t i = 0; i < SensorData::MAX_WIFI_STATIONS; i++) {
+                if (i < slotCount && stationActive != nullptr && stationActive[i]) {
+                    sensors.wifiStationActive[i] = true;
+                    sensors.wifiStationRssi[i] = (stationRssi != nullptr) ? stationRssi[i] : -100;
+                    sensors.wifiStationDistM[i] = (stationDistM != nullptr) ? stationDistM[i] : 0.0f;
+                    sensors.wifiStationStale[i] = (stationStale != nullptr)
+                        ? stationStale[i]
+                        : (sensors.wifiStationRssi[i] <= -98 || sensors.wifiStationDistM[i] <= 0.05f);
+                } else {
+                    sensors.wifiStationActive[i] = false;
+                    sensors.wifiStationRssi[i] = -100;
+                    sensors.wifiStationDistM[i] = 0.0f;
+                    sensors.wifiStationStale[i] = false;
+                }
+            }
             sensors.wifiCsiCalibrating = calibrating;
             sensors.wifiCsiCalibSecLeft = secLeft;
             sensors.wifiMotionMetric = metric;
             sensors.wifiThreshold = threshold;
             sensors.wifiMotionDetected = motionDetected;
+            sensors.wifiRssi1mCalibrating = rssi1mCalibrating;
             xSemaphoreGive(stateMutex);
         }
     }
@@ -616,6 +647,39 @@ public:
             xSemaphoreGive(stateMutex);
         }
         return res;
+    }
+
+    void requestRssi1mCalibration() {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            sensors.wifiRssi1mCalibRequested = true;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    bool popRssi1mCalibrationRequested() {
+        bool res = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            res = sensors.wifiRssi1mCalibRequested;
+            sensors.wifiRssi1mCalibRequested = false;
+            xSemaphoreGive(stateMutex);
+        }
+        return res;
+    }
+
+    void setWifiSleepPaused(bool paused) {
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            wifiSleepPaused = paused;
+            xSemaphoreGive(stateMutex);
+        }
+    }
+
+    bool isWifiSleepPaused() {
+        bool paused = false;
+        if (xSemaphoreTake(stateMutex, (TickType_t)10) == pdTRUE) {
+            paused = wifiSleepPaused;
+            xSemaphoreGive(stateMutex);
+        }
+        return paused;
     }
 
     // =========================================================================

@@ -3,6 +3,7 @@
 #include "WiFiCsiManager.h"// Wi-Fi CSI Radar a měření vzdálenosti
 #include "SensorManager.h" // Přímé ovládání bzučáku a fyzických senzorů
 #include <ArduinoJson.h>   // Knihovna pro snadnou práci s formátem JSON (čtení i tvorba zpráv)
+#include <esp_wifi.h>
 
 // --- Konstruktor: Vytvoření objektu WebManager ---
 WebManager::WebManager() 
@@ -35,6 +36,10 @@ bool WebManager::begin(SystemState* state) {
     } else {
         WiFi.softAP(WIFI_AP_SSID, NULL, WIFI_AP_CHANNEL, 0, WIFI_AP_MAX_CONN); // Otevřená síť bez hesla
     }
+
+    // Stabilní 20 MHz pásmo bez úspory energie na straně ESP32 pro přesné CSI a rychlé probouzení
+    WiFi.setSleep(false);
+    esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
 
     // Ladicí výpisy do sériové linky
     Serial.print("[WebManager] AP SSID: ");
@@ -206,9 +211,11 @@ void WebManager::handleClientMessage(AsyncWebSocketClient *client, uint8_t *data
         uint32_t col = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
         pState->setRemoteLedOverride(col, bright);   // Zapíšeme do prioritního stavu s referencí senzoru
     }
-    // 7. Příkaz pro spuštění kalibrace Wi-Fi CSI radaru
+    // 7. Příkaz pro spuštění kalibrace Wi-Fi CSI radaru (frontováno přes SystemState pro Core 0)
     else if (strcmp(cmd, "calibrateCsi") == 0) {
-        wifiCsiManager.startCalibration(5000);
+        if (pState) {
+            pState->requestWifiCalibration();
+        }
     }
     // 8. Příkaz pro pípnutí fyzického bzučáku
     else if (strcmp(cmd, "beep") == 0) {
@@ -312,13 +319,22 @@ void WebManager::broadcastTelemetry() {
     doc["mode"] = (int)mode;                   // Aktuální číslo běžícího módu na displeji
     doc["uptime"] = millis();                  // Jak dlouho ESP32 běží od zapnutí (v milisekundách)
     doc["heap"] = ESP.getFreeHeap();           // Velikost volné operační paměti RAM v bajtech
-    doc["clients"] = (int)ws.count();          // Počet právě připojených telefonů
+    doc["clients"] = (int)ws.count();          // Počet připojených WebSocket klientů
+    doc["sta_count"] = d.wifiStationsCount;    // Počet telefonů připojených k Wi-Fi AP
     doc["csi_motion"] = d.wifiMotionDetected;  // Stav CSI radaru (pohyb / klid)
     doc["csi_metric"] = d.wifiMotionMetric;    // CSI úroveň signálu
-    doc["wifi_dist"] = d.wifiDistanceM;        // Odhad vzdálenosti v metrech
+    doc["wifi_dist"] = d.wifiDistanceM;        // Nejbližší / primární vzdálenost v metrech
+    doc["wifi_thresh"] = roundf(d.wifiThreshold * 100.0f) / 100.0f;
+    doc["wifi_calib"] = d.wifiCsiCalibrating;
+    doc["wifi_calib_sec"] = d.wifiCsiCalibSecLeft;
 
-    // Převedeme JSON do textového řetězce ve statickém poli buffer[768] (bezpečně bez dynamické alokace)
-    char buffer[768];
+    JsonArray dists = doc["wifi_dists"].to<JsonArray>();
+    for (uint8_t i = 0; i < d.wifiStationsCount && i < SensorData::MAX_WIFI_STATIONS; i++) {
+        dists.add(roundf(d.wifiStationDistM[i] * 100.0f) / 100.0f);
+    }
+
+    // Převedeme JSON do textového řetězce ve statickém poli buffer[1024] (bezpečně bez dynamické alokace)
+    char buffer[1024];
     size_t len = serializeJson(doc, buffer, sizeof(buffer));
     
     // Pokud se JSON úspěšně vytvořil, rozešleme ho všem připojeným klientům přes WebSocket
@@ -329,16 +345,39 @@ void WebManager::broadcastTelemetry() {
 
 // --- Funkce update(): Pravidelná obsluha volaná v nekonečné smyčce ---
 void WebManager::update() {
+    static bool wasSleeping = false;
+    static unsigned long lastWsPingMs = 0;
+
+    if (pState) {
+        AppMode currentMode = pState->getMode();
+
+        if (currentMode == MODE_SLEEP) {
+            wifiCsiManager.pauseForSleep();
+            pState->setWifiSleepPaused(true);
+            wasSleeping = true;
+            return;
+        }
+
+        if (wasSleeping) {
+            WiFi.setSleep(false);
+            esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+            wifiCsiManager.resumeFromSleep();
+            pState->setWifiSleepPaused(false);
+            wasSleeping = false;
+        }
+    }
+
     // 1. Zpracujeme případné příchozí požadavky pro přesměrování DNS (Captive Portal)
     dnsServer.processNextRequest();
 
     // 2. Uklidíme z paměti klienty, kteří se už odpojili
     ws.cleanupClients();
 
-    // 3. Řízení CSI radaru podle aktivního módu
+    // 3. Řízení CSI radaru a promiskuitního RSSI snímání podle aktivního módu
     if (pState) {
         AppMode currentMode = pState->getMode();
         if (currentMode == MODE_WIFI_DETECTION) {
+            wifiCsiManager.setDistanceActiveMode(false);
             if (!wifiCsiManager.isRunning()) {
                 wifiCsiManager.start();
             }
@@ -350,13 +389,34 @@ void WebManager::update() {
             if (wifiCsiManager.isRunning()) {
                 wifiCsiManager.stop();
             }
+            wifiCsiManager.setDistanceActiveMode(currentMode == MODE_WIFI_SPOJENI);
+            if (currentMode == MODE_WIFI_SPOJENI && pState->popRssi1mCalibrationRequested()) {
+                wifiCsiManager.startRssi1mCalibration(1500);
+            }
         }
 
-        // Neustálé měření síly signálu a vzdálenosti mobilu (ve VŠECH módech)
-        wifiCsiManager.updateDistanceContinuous();
+        // Neustálé měření síly signálu a vzdálenosti mobilů (v QR módu i s aktivními sondami)
+        wifiCsiManager.updateDistanceContinuous(currentMode == MODE_WIFI_SPOJENI);
 
-        // Zápis telemetrie do SystemState
-        uint8_t stations = WiFi.softAPgetStationNum();
+        if (ws.count() > 0 &&
+            (currentMode == MODE_WIFI_DETECTION || currentMode == MODE_WIFI_SPOJENI)) {
+            unsigned long nowPing = millis();
+            if (nowPing - lastWsPingMs >= 1000UL && wifiCsiManager.hasSilentStation(400UL)) {
+                lastWsPingMs = nowPing;
+                ws.pingAll();
+            }
+        }
+
+        // Zápis telemetrie do SystemState (synchronizovaně se seznamem slotů)
+        uint8_t stations = 0;
+        int8_t stationRssi[SensorData::MAX_WIFI_STATIONS];
+        float stationDist[SensorData::MAX_WIFI_STATIONS];
+        bool stationActive[SensorData::MAX_WIFI_STATIONS];
+        bool stationStale[SensorData::MAX_WIFI_STATIONS];
+        wifiCsiManager.copyStationMetrics(stations, stationRssi, stationDist,
+                                          stationActive, SensorData::MAX_WIFI_STATIONS,
+                                          stationStale);
+
         int8_t rssi = wifiCsiManager.getRssi();
         float dist = wifiCsiManager.getDistanceMeters();
         bool calib = wifiCsiManager.isCalibrating();
@@ -365,7 +425,10 @@ void WebManager::update() {
         float thresh = wifiCsiManager.getThreshold();
         bool motion = wifiCsiManager.isMotionDetected();
 
-        pState->updateWifiMetrics(stations, rssi, dist, calib, secLeft, metric, thresh, motion);
+        pState->updateWifiMetrics(stations, rssi, dist, stationRssi, stationDist,
+                                  stationActive, SensorData::MAX_WIFI_STATIONS,
+                                  calib, secLeft, metric, thresh, motion,
+                                  stationStale, wifiCsiManager.isRssi1mCalibrating());
     }
 
     // 4. Pokud je připojen alespoň jeden mobil a uplynul požadovaný čas (100 ms), pošleme nová data

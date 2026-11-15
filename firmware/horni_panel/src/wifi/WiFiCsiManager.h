@@ -1,99 +1,227 @@
-#ifndef WIFI_CSI_MANAGER_H
-#define WIFI_CSI_MANAGER_H
+#pragma once
 
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
-#include "esp_wifi.h"
-#include <math.h>
+#include <esp_wifi.h>
+#include <esp_netif.h>
+#include <esp_netif_sta_list.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 #define CSI_MAX_SUBCARRIERS 64
-#define CSI_WINDOW_SIZE 8
+#define CSI_WINDOW_SIZE     8
+#define CSI_NUM_PHY_CLASSES 3
+#define CSI_MAX_STATIONS    4
+#define CSI_RSSI_WIN_SIZE   11
+#define CSI_RSSI_CACHE_SIZE 8
 
+struct SavedRssiCalib {
+    uint8_t mac[6];
+    float rssiAt1m;
+    bool valid;
+};
+
+/**
+ * @brief Nezávislý stavový buffer a DSP stav pro jeden připojený telefon (podle MAC).
+ */
+struct CsiStationSlot {
+    bool active;
+    uint8_t mac[6];
+    uint32_t ipAddr;           // IPv4 v network byte order (0 = čeká na DHCP)
+    uint32_t connectOrder;     // Pořadí připojení pro konzistentní zobrazení #1..#4
+
+    // --- Odhad vzdálenosti (11-vzorkový upper-trimmed medián + dt-Kalman v dBm) ---
+    int8_t rawApRssi;
+    int8_t latestRxRssi;
+    unsigned long lastRxRssiMs;
+    volatile uint32_t rxRssiSeq;
+    uint32_t lastDistSeq;
+    unsigned long lastApFallbackMs;
+    bool apSeeded;
+    bool rssiStale;
+    float rssiAt1m;
+    uint8_t dipStreak;
+    int8_t dipSamples[3];
+    int8_t rssiHist[CSI_RSSI_WIN_SIZE];
+    uint8_t rssiHistHead;
+    uint8_t rssiHistCount;
+    bool kfInitialized;
+    float kfX;
+    float kfP;
+    int8_t filteredRssi;
+    float smoothedDistance;
+    unsigned long lastDistUpdateMs;
+    double calib1mSum;
+    uint16_t calib1mCount;
+
+    // --- Per-PHY-class CSI buffery dané stanice (0: 11g, 1: HT20, 2: HT20-STBC) ---
+    bool phyInitialized[CSI_NUM_PHY_CLASSES];
+    uint16_t phyWarmupCount[CSI_NUM_PHY_CLASSES];
+    uint64_t bgActiveMask[CSI_NUM_PHY_CLASSES];
+    uint64_t prevActiveMask[CSI_NUM_PHY_CLASSES];
+    float staticBg[CSI_NUM_PHY_CLASSES][CSI_MAX_SUBCARRIERS];
+    float prevNorm[CSI_NUM_PHY_CLASSES][CSI_MAX_SUBCARRIERS];
+    bool anyPhyInitialized;
+    unsigned long lastCsiMathMs;
+
+    // --- Sdílené dynamické okno odchylek od per-PHY statického pozadí ---
+    float dynamicWindow[CSI_WINDOW_SIZE][CSI_MAX_SUBCARRIERS];
+    uint64_t winValidMask[CSI_WINDOW_SIZE];
+    uint8_t windowHead;
+    uint8_t windowCount;
+
+    // --- Akumulátor dávek (burst-safe pod csiMux) ---
+    bool hasLastRaw;
+    float lastRawMetric;
+    float pendingRawSum;
+    float pendingRawMax;
+    float pendingOscSum;
+    float pendingBgSum;
+    uint16_t pendingCount;
+    volatile uint32_t csiPacketCount;
+    volatile unsigned long lastCsiPacketMs;
+
+    // --- Normalizovaná SNR metrika, univerzální prahy a časový debounce ---
+    bool calibReady;
+    float baselineNoise;       // Klidové mu (surová metrika)
+    float baselineStd;         // Klidové sigma (surová metrika)
+    float noiseScale;          // Jmenovatel pro SNR normalizaci
+    float oscMu;
+    float oscNoiseScale;
+    float bgMu;
+    float bgNoiseScale;
+    float detectionThreshold;  // Univerzální práh v SNR jednotkách (2.4f)
+    float smoothedMetric;      // Hladká SNR metrika (1.0 = klid, 2.4+ = pohyb)
+    bool motionDetected;
+    unsigned long lastEnvMs;
+    unsigned long enterCondStartMs;
+    unsigned long exitCondStartMs;
+
+    // --- Kalibrační akumulátor (Welford variance) + tichý warm-up při připojení ---
+    uint16_t calibSamples;
+    double calibMean;
+    double calibM2;
+    double calibOscMean;
+    double calibOscM2;
+    double calibBgMean;
+    uint16_t autoWarmupLeft;
+    uint8_t probeStep;
+};
+
+/**
+ * @brief Správce Wi-Fi CSI radaru a více-stanicového měření vzdálenosti z RSSI.
+ *
+ * Každý připojený telefon dostává vlastní izolovaný multi-PHY CSI buffer,
+ * dt-adaptivní odstraňování statického pozadí, SNR normalizaci, promiskuitní
+ * zachytávání RX RSSI a eskalované ARP/UDP/ICMP sondování.
+ */
 class WiFiCsiManager {
 public:
     WiFiCsiManager();
     ~WiFiCsiManager();
 
-    // Inicializace CSI hardware a callbacků
     bool begin();
-
-    // Zapnutí a vypnutí aktivního zpracování CSI (šetří CPU v jiných módech)
     void start();
     void stop();
+    void setDistanceActiveMode(bool active);
+    void pauseForSleep();
+    void resumeFromSleep();
     bool isRunning() const { return running; }
 
-    // Spuštění kalibrace klidového šumu místnosti (výchozí 5 sekund)
     void startCalibration(uint32_t durationMs = 5000);
     bool isCalibrating() const { return calibrating; }
-    uint8_t getCalibrationProgress() const; // 0 až 100 %
-    uint8_t getCalibrationSecondsLeft() const; // 5.. 4.. 3.. 2.. 1.. 0
+    uint8_t getCalibrationProgress() const;
+    uint8_t getCalibrationSecondsLeft() const;
 
-    // Pravidelná aktualizace a vyhodnocení (volá se ve smyčce Task_WiFi_Web)
+    void startRssi1mCalibration(uint32_t durationMs = 1500);
+    bool isRssi1mCalibrating() const { return rssi1mCalibrating; }
+
+    // Aktualizace CSI detekce pohybu + aktivního round-robin sondování (v MODE_WIFI_DETECTION)
     void update();
-    void updateDistanceContinuous(); // Běží neustále ve všech módech
 
-    // Výsledné hodnoty pro SystemState a UI
+    // Průběžný výpočet vzdáleností všech připojených telefonů (v QR módu s jemným pingováním)
+    void updateDistanceContinuous(bool enableActiveProbe = false);
+
+    // Zjištění, zda některý připojený telefon mlčí déle než silentMs (pro WebSocket ping)
+    bool hasSilentStation(unsigned long silentMs) const;
+
+    // Souhrnné gettery (zpětná kompatibilita pro grafy a web)
+    int8_t getRssi() const { return primaryRssi; }
+    float getDistanceMeters() const { return primaryDistance; }
     float getSmoothedMetric() const { return smoothedMetric; }
     float getThreshold() const { return detectionThreshold; }
-    float getBaselineNoise() const { return baselineNoise; }
     bool isMotionDetected() const { return motionDetected; }
-    int8_t getRssi() const { return currentRssi; }
-    float getDistanceMeters() const { return smoothedDistance; }
 
-    // Statický interní callback volaný z Wi-Fi ovladače ESP-IDF
-    static void csiRxCallback(void *ctx, wifi_csi_info_t *info);
+    // Bezpečný snapshot individuálních vzdáleností, RSSI a stavu čerstvosti (#1..#4)
+    void copyStationMetrics(uint8_t &outCount, int8_t *outRssi, float *outDistM,
+                            bool *outActive, uint8_t maxSlots, bool *outStale = nullptr) const;
 
 private:
     bool initialized;
-    bool running;
+    volatile bool running;
+    volatile bool distanceActiveMode;
+    volatile bool promiscuousActive;
+    volatile bool pausedForSleep;
 
-    // Vzdálenost a RSSI filtr
-    float filteredRssi;
-    float smoothedDistance;
+    volatile bool calibrating;
+    unsigned long calibStartMs;
+    unsigned long calibDurationMs;
 
-    // Kalibrace
-    bool calibrating;
-    unsigned long calibStartTime;
-    uint32_t calibDurationMs;
-    float calibSum;
-    uint32_t calibSamples;
+    bool rssi1mCalibrating;
+    unsigned long rssi1mStartMs;
+    unsigned long rssi1mDurationMs;
 
-    // Detekce a adaptivní práh
     float baselineNoise;
-    float sensitivityMultiplier;
-    float sensitivityOffset;
     float detectionThreshold;
     float smoothedMetric;
-
-    // Debounce filtrace (Fast Attack / Smooth Release)
-    int motionScore;
     bool motionDetected;
 
-    // Aktivní probing pro stálý tok paketů
-    WiFiUDP udp;
-    unsigned long lastProbeTime;
+    int8_t primaryRssi;
+    float primaryDistance;
 
-    // Filtrování MAC adresy připojeného telefonu
-    uint8_t targetMac[6];
-    bool targetMacValid;
+    uint32_t nextConnectOrder;
+    uint8_t probeRrCursor;
+    unsigned long lastProbeMs;
+    unsigned long lastStationSyncMs;
 
-    // Interní CSI stav (statické pozadí a klouzavé okno)
-    static float staticBg[CSI_MAX_SUBCARRIERS];
-    static bool bgInitialized;
-    static float dynamicWindow[CSI_WINDOW_SIZE][CSI_MAX_SUBCARRIERS];
-    static int windowHead;
-    static int windowCount;
-    static float lastGrad[CSI_MAX_SUBCARRIERS];
+    int icmpSock;
+    uint16_t icmpSeq;
+    WiFiUDP probeUdp;
 
-    static volatile float currentMetric;
-    static volatile int8_t currentRssi;
-    static volatile uint32_t csiPacketCount;
+    CsiStationSlot slots[CSI_MAX_STATIONS];
+    SavedRssiCalib rssiCalibCache[CSI_RSSI_CACHE_SIZE];
+    uint8_t rssiCalibCacheHead;
 
-    void updateTargetStation();
-    void sendProbePacket();
+    static portMUX_TYPE csiMux;
+    static WiFiCsiManager *s_instance;
+
+    void configureRadioCallbacks();
+    void updatePromiscuousState();
+    float lookupSavedRssiAt1m(const uint8_t *mac) const;
+    void saveRssiAt1m(const uint8_t *mac, float rssiAt1m);
+
+    void syncStations(unsigned long now, bool force = false);
+    void sendRoundRobinProbe(unsigned long now, unsigned long intervalMs, bool useCsiRxClock);
+    void triggerArpProbe(uint32_t targetIpNetOrder);
+    void ensureIcmpSocket();
+    void drainIcmpReplies();
+    void updateSlotDistance(CsiStationSlot &slot, int8_t sampleRssi, unsigned long now);
+    void applyDistanceSample(CsiStationSlot &slot, int8_t sampleRssi, unsigned long now);
+    void finishRssi1mCalibration();
+    void resetSlot(CsiStationSlot &slot, const uint8_t *mac, uint32_t ipAddr,
+                   int8_t initialRssi, unsigned long now, float savedRssi1m);
+    int findSlotByMacLocked(const uint8_t *mac) const;
+    int findFreeSlotLocked() const;
+    void finishGlobalCalibration();
+    void finalizeSlotThreshold(CsiStationSlot &slot, bool fromGlobalCalib);
+    void getOrderedActiveIndices(int *outIdx, uint8_t &outCount) const;
+
+    static void csiRxCallback(void *ctx, wifi_csi_info_t *info);
+    static void promiscuousRxCallback(void *buf, wifi_promiscuous_pkt_type_t type);
+    static void arpTcpipCallback(void *ctx);
+    void handleCsiPacket(wifi_csi_info_t *info);
+    void handlePromiscuousPacket(const wifi_promiscuous_pkt_t *pkt, wifi_promiscuous_pkt_type_t type);
 };
 
 extern WiFiCsiManager wifiCsiManager;
-
-#endif // WIFI_CSI_MANAGER_H
