@@ -8,7 +8,7 @@ Téma návrhu a sestrojení výukového a prezentačního kufříku s čipy ESP3
 
 Předlohou mé maturitní práce je bakalářská práce z Vysokého učení technického v Brně (VUT). Vytvořený demokit zde sloužil jako prezentační projekt používaný na dnech otevřených dveří.
 
-Na základě této předlohy vznikl nápad vytvořit pro robotický kroužek a školu vlastní, technologicky pokročilejší a interaktivnější kufřík, který bude lehce přenositelný a po připojení okamžitě funkční. Své využití najde jak na dnech otevřených dveří či na veletrzích středních škol.
+Na základě této předlohy vznikl nápad vytvořit pro robotický kroužek a školu vlastní, technologicky pokročilejší a interaktivnější kufřík, který bude lehce přenositelný a po připojení okamžitě funkční. Své využití najde na dnech otevřených dveří či na veletrzích středních škol.
 
 Kufřík nemá sloužit pouze na prezentaci, ale také jako ukázka využití různých periferií, jejichž zapojení a kód jsou zdokumentovány.
 
