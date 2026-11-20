@@ -6,10 +6,10 @@ V kufříku jsem se snažil uplatnit jak jednoduché digitální a analogové se
 
 ### 2.1 Srovnání a výběr mikrokontrolérů
 
-Kvůli velkému počtu potřebných pinů a snaze omezit kabeláž procházející ohybem kufru jsem použil dva samostatné mikrokontroléry, pro každý panel zvlášť. Vzorový demokit z VUT využívá pro řízení také dvě osmibitové vývojové desky značky Arduino – konkrétně Arduino UNO R3 v horní desce a větší Arduino MEGA 2560 ve spodní desce. Ačkoliv je tato kombinace pro základní ovládání periferií dostačující, pro náročnější grafiku, více současně běžících úloh (multitasking) a bezdrátové ovládání přes telefon již svými parametry nestačí. Z tohoto důvodu jsem pro svůj kufřík zvolil modernější 32bitové čipy z rodiny ESP32. Základní srovnání obou přístupů shrnuje Tabulka 1.
+Kvůli velkému počtu potřebných pinů a snaze omezit kabeláž procházející ohybem kufru jsem použil dva samostatné mikrokontroléry, pro každý panel zvlášť. Vzorový demokit z VUT využívá pro řízení také dvě osmibitové vývojové desky značky Arduino – konkrétně Arduino UNO R3 v horní desce a větší Arduino MEGA 2560 ve spodní desce. Ačkoliv je tato kombinace pro základní ovládání periferií dostačující, pro náročnější grafiku, více současně běžících úloh (multitasking) a bezdrátové ovládání přes telefon již svými parametry nestačí. Z tohoto důvodu jsem pro svůj kufřík zvolil modernější 32bitové čipy z rodiny ESP32. Základní srovnání obou přístupů shrnuje Tabulka 2-2-1.
 
 
-**Tabulka 1: Srovnání řídicích desek (ESP-Demo-Box vs. VUT Arduino demokit)**
+**Tabulka 2-2-1: Srovnání řídicích desek (ESP-Demo-Box vs. VUT Arduino demokit)**
 
 
 | **Deska / role v kufru** | **Procesor a takt** | **Paměť (Flash / RAM)** | **I/O piny** | **Konektivita** |
@@ -25,12 +25,12 @@ Spodní panel pak řídí osvědčený modul ESP32-WROOM-32 (DevKitC-V4). Na tom
 
 ### 2.2 Přehled použitých komponent
 
-Kompletní výčet všech součástek osazených na horním a spodním panelu včetně použitého komunikačního rozhraní a jejich funkce v kufříku uvádějí Tabulka 2 a Tabulka 3.
+Kompletní výčet všech součástek osazených na horním a spodním panelu včetně použitého komunikačního rozhraní a jejich funkce v kufříku uvádějí Tabulka 2-2 a Tabulka 2-3.
 
 Vzhledem k velkému počtu použitých prvků jsem se v této kapitole rozhodl nerozepisovat každou součástku. V následující podkapitole se proto věnuji pouze několika vybraným komponentám, se kterými jsem při stavbě kufříku pracoval poprvé, nebo které jsou technicky zajímavé.
 
 
-**Tabulka 2: Přehled komponent horního panelu (ESP32-S3)**
+**Tabulka 2-2: Přehled komponent horního panelu (ESP32-S3)**
 
 
 | **Komponenta** | **Typ / modul** | **Rozhraní** | **Účel v kufříku** |
@@ -52,7 +52,7 @@ Vzhledem k velkému počtu použitých prvků jsem se v této kapitole rozhodl n
 | Snímače osvětlení | 2× fotorezistor (dělič 10 kΩ) | 2× Analogové (ADC) | Měření intenzity okolního osvětlení ze dvou stran |
 | Uživatelské tlačítko | Mikrospínač INFO | Digitální (GPIO) | Nápověda k aktuálnímu módu a probuzení ze spánku |
 
-**Tabulka 3: Přehled komponent spodního panelu (ESP32-WROOM-32) a napájecí části**
+**Tabulka 2-3: Přehled komponent spodního panelu (ESP32-WROOM-32) a napájecí části**
 
 
 | **Komponenta** | **Typ / modul** | **Rozhraní** | **Účel v kufříku** |
